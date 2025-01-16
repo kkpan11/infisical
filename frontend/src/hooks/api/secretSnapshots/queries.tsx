@@ -1,13 +1,9 @@
 /* eslint-disable no-param-reassign */
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import {
-  decryptAssymmetric,
-  decryptSymmetric
-} from "@app/components/utilities/cryptography/crypto";
 import { apiRequest } from "@app/config/request";
 
-import { DecryptedSecret } from "../secrets/types";
+import { SecretType, SecretV3RawSanitized } from "../secrets/types";
 import {
   TGetSecretSnapshotsDTO,
   TSecretRollbackDTO,
@@ -51,6 +47,7 @@ const fetchWorkspaceSnaphots = async ({
 
 export const useGetWorkspaceSnapshotList = (dto: TGetSecretSnapshotsDTO & { isPaused?: boolean }) =>
   useInfiniteQuery({
+    initialPageParam: 0,
     enabled: Boolean(dto.workspaceId && dto.environment) && !dto.isPaused,
     queryKey: secretSnapshotKeys.list({ ...dto }),
     queryFn: ({ pageParam }) => fetchWorkspaceSnaphots({ ...dto, offset: pageParam }),
@@ -65,55 +62,33 @@ const fetchSnapshotEncSecrets = async (snapshotId: string) => {
   return res.data.secretSnapshot;
 };
 
-export const useGetSnapshotSecrets = ({ decryptFileKey, snapshotId }: TSnapshotDataProps) =>
+export const useGetSnapshotSecrets = ({ snapshotId }: TSnapshotDataProps) =>
   useQuery({
     queryKey: secretSnapshotKeys.snapshotData(snapshotId),
-    enabled: Boolean(snapshotId && decryptFileKey),
+    enabled: Boolean(snapshotId),
     queryFn: () => fetchSnapshotEncSecrets(snapshotId),
     select: (data) => {
-      const PRIVATE_KEY = localStorage.getItem("PRIVATE_KEY") as string;
-      const latestKey = decryptFileKey;
-      const key = decryptAssymmetric({
-        ciphertext: latestKey.encryptedKey,
-        nonce: latestKey.nonce,
-        publicKey: latestKey.sender.publicKey,
-        privateKey: PRIVATE_KEY
-      });
-
-      const sharedSecrets: DecryptedSecret[] = [];
+      const sharedSecrets: SecretV3RawSanitized[] = [];
       const personalSecrets: Record<string, { id: string; value: string }> = {};
-      data.secretVersions.forEach((encSecret) => {
-        const secretKey = decryptSymmetric({
-          ciphertext: encSecret.secretKeyCiphertext,
-          iv: encSecret.secretKeyIV,
-          tag: encSecret.secretKeyTag,
-          key
-        });
-
-        const secretValue = decryptSymmetric({
-          ciphertext: encSecret.secretValueCiphertext,
-          iv: encSecret.secretValueIV,
-          tag: encSecret.secretValueTag,
-          key
-        });
-
-        const secretComment = "";
-
+      data.secretVersions.forEach((secretVersion) => {
         const decryptedSecret = {
-          id: encSecret.secretId,
+          id: secretVersion.secretId,
           env: data.environment.slug,
-          key: secretKey,
-          value: secretValue,
-          tags: encSecret.tags,
-          comment: secretComment,
-          createdAt: encSecret.createdAt,
-          updatedAt: encSecret.updatedAt,
+          key: secretVersion.secretKey,
+          value: secretVersion.secretValue || "",
+          tags: secretVersion.tags,
+          comment: secretVersion.secretComment,
+          createdAt: secretVersion.createdAt,
+          updatedAt: secretVersion.updatedAt,
           type: "modified",
-          version: encSecret.version
+          version: secretVersion.version
         };
 
-        if (encSecret.type === "personal") {
-          personalSecrets[decryptedSecret.key] = { id: encSecret.secretId, value: secretValue };
+        if (secretVersion.type === SecretType.Personal) {
+          personalSecrets[decryptedSecret.key] = {
+            id: secretVersion.secretId,
+            value: secretVersion.secretValue || ""
+          };
         } else {
           sharedSecrets.push(decryptedSecret);
         }
@@ -168,26 +143,24 @@ export const useGetWsSnapshotCount = ({
 export const usePerformSecretRollback = () => {
   const queryClient = useQueryClient();
 
-  return useMutation<{}, {}, TSecretRollbackDTO>({
+  return useMutation<object, object, TSecretRollbackDTO>({
     mutationFn: async ({ snapshotId }) => {
       const { data } = await apiRequest.post(`/api/v1/secret-snapshot/${snapshotId}/rollback`);
       return data;
     },
     onSuccess: (_, { workspaceId, environment, directory }) => {
-      queryClient.invalidateQueries([
-        { workspaceId, environment, secretPath: directory },
-        "secrets"
-      ]);
-      queryClient.invalidateQueries([
-        "secret-folders",
-        { projectId: workspaceId, environment, path: directory }
-      ]);
-      queryClient.invalidateQueries(
-        secretSnapshotKeys.list({ workspaceId, environment, directory })
-      );
-      queryClient.invalidateQueries(
-        secretSnapshotKeys.count({ workspaceId, environment, directory })
-      );
+      queryClient.invalidateQueries({
+        queryKey: [{ workspaceId, environment, secretPath: directory }, "secrets"]
+      });
+      queryClient.invalidateQueries({
+        queryKey: ["secret-folders", { projectId: workspaceId, environment, path: directory }]
+      });
+      queryClient.invalidateQueries({
+        queryKey: secretSnapshotKeys.list({ workspaceId, environment, directory })
+      });
+      queryClient.invalidateQueries({
+        queryKey: secretSnapshotKeys.count({ workspaceId, environment, directory })
+      });
     }
   });
 };

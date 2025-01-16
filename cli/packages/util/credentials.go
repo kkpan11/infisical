@@ -52,14 +52,10 @@ func GetUserCredsFromKeyRing(userEmail string) (credentials models.UserCredentia
 		return models.UserCredentials{}, fmt.Errorf("getUserCredsFromKeyRing: Something went wrong when unmarshalling user creds [err=%s]", err)
 	}
 
-	if err != nil {
-		return models.UserCredentials{}, fmt.Errorf("GetUserCredsFromKeyRing: Unable to store user credentials [err=%s]", err)
-	}
-
 	return userCredentials, err
 }
 
-func GetCurrentLoggedInUserDetails() (LoggedInUserDetails, error) {
+func GetCurrentLoggedInUserDetails(setConfigVariables bool) (LoggedInUserDetails, error) {
 	if ConfigFileExists() {
 		configFile, err := GetConfigFile()
 		if err != nil {
@@ -75,7 +71,16 @@ func GetCurrentLoggedInUserDetails() (LoggedInUserDetails, error) {
 			if strings.Contains(err.Error(), "credentials not found in system keyring") {
 				return LoggedInUserDetails{}, errors.New("we couldn't find your logged in details, try running [infisical login] then try again")
 			} else {
-				return LoggedInUserDetails{}, fmt.Errorf("failed to fetch creditnals from keyring because [err=%s]", err)
+				return LoggedInUserDetails{}, fmt.Errorf("failed to fetch credentials from keyring because [err=%s]", err)
+			}
+		}
+
+		if setConfigVariables {
+			config.INFISICAL_URL_MANUAL_OVERRIDE = config.INFISICAL_URL
+			//configFile.LoggedInUserDomain
+			//if not empty set as infisical url
+			if configFile.LoggedInUserDomain != "" {
+				config.INFISICAL_URL = AppendAPIEndpoint(configFile.LoggedInUserDomain)
 			}
 		}
 
@@ -83,13 +88,6 @@ func GetCurrentLoggedInUserDetails() (LoggedInUserDetails, error) {
 		httpClient := resty.New().
 			SetAuthToken(userCreds.JTWToken).
 			SetHeader("Accept", "application/json")
-
-		config.INFISICAL_URL_MANUAL_OVERRIDE = config.INFISICAL_URL
-		//configFile.LoggedInUserDomain
-		//if not empty set as infisical url
-		if configFile.LoggedInUserDomain != "" {
-			config.INFISICAL_URL = configFile.LoggedInUserDomain
-		}
 
 		isAuthenticated := api.CallIsAuthenticated(httpClient)
 		// TODO: add refresh token

@@ -3,9 +3,7 @@ import crypto from "crypto";
 
 import jsrp from "jsrp";
 
-import { issueBackupPrivateKey ,
-  srp1
-} from "@app/hooks/api/auth/queries";
+import { issueBackupPrivateKey, srp1 } from "@app/hooks/api/auth/queries";
 
 import generateBackupPDF from "../generateBackupPDF";
 import Aes256Gcm from "./aes-256-gcm";
@@ -75,7 +73,7 @@ const issueBackupKey = async ({
           },
           async () => {
             clientKey.createVerifier(
-              async (err: any, result: { salt: string; verifier: string }) => {
+              async (_err: any, result: { salt: string; verifier: string }) => {
                 const { ciphertext, iv, tag } = Aes256Gcm.encrypt({
                   text: String(localStorage.getItem("PRIVATE_KEY")),
                   secret: generatedKey
@@ -97,7 +95,6 @@ const issueBackupKey = async ({
                     generatedKey
                   });
                   setBackupKeyIssued(true);
-              
                 } catch {
                   setBackupKeyError(true);
                 }
@@ -107,7 +104,7 @@ const issueBackupKey = async ({
         );
       }
     );
-  } catch (error) {
+  } catch {
     setBackupKeyError(true);
     console.log("Failed to issue a backup key");
   }

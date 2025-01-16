@@ -1,8 +1,5 @@
 #!/bin/sh
 
-cd frontend-build
-scripts/initialize-standalone-build.sh
+update-ca-certificates
 
-cd ../
-
-exec node dist/main.mjs
+exec node --enable-source-maps dist/main.mjs

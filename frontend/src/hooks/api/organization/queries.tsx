@@ -1,19 +1,24 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient, UseQueryOptions } from "@tanstack/react-query";
 
 import { apiRequest } from "@app/config/request";
+import { OrderByDirection } from "@app/hooks/api/generic/types";
 
-import { IdentityMembershipOrg } from "../identities/types";
+import { TGroupOrgMembership } from "../groups/types";
+import { IntegrationAuth } from "../types";
 import {
   BillingDetails,
   Invoice,
   License,
   Organization,
+  OrgIdentityOrderBy,
   OrgPlanTable,
   PlanBillingInfo,
   PmtMethod,
   ProductsTable,
-  RenameOrgDTO,
-  TaxID
+  TaxID,
+  TListOrgIdentitiesDTO,
+  TOrgIdentitiesList,
+  UpdateOrgDTO
 } from "./types";
 
 export const organizationKeys = {
@@ -27,7 +32,17 @@ export const organizationKeys = {
   getOrgTaxIds: (orgId: string) => [{ orgId }, "organization-tax-ids"] as const,
   getOrgInvoices: (orgId: string) => [{ orgId }, "organization-invoices"] as const,
   getOrgLicenses: (orgId: string) => [{ orgId }, "organization-licenses"] as const,
-  getOrgIdentityMemberships: (orgId: string) => [{ orgId }, "organization-identity-memberships"] as const,
+  getOrgIdentityMemberships: (orgId: string) =>
+    [{ orgId }, "organization-identity-memberships"] as const,
+  // allows invalidation using above key without knowing params
+  getOrgIdentityMembershipsWithParams: ({
+    organizationId: orgId,
+    ...params
+  }: TListOrgIdentitiesDTO) =>
+    [...organizationKeys.getOrgIdentityMemberships(orgId), params] as const,
+  getOrgGroups: (orgId: string) => [{ orgId }, "organization-groups"] as const,
+  getOrgIntegrationAuths: (orgId: string) => [{ orgId }, "integration-auths"] as const,
+  getOrgById: (orgId: string) => ["organization", { orgId }]
 };
 
 export const fetchOrganizations = async () => {
@@ -46,7 +61,23 @@ export const useGetOrganizations = () => {
   });
 };
 
-export const useCreateOrg = () => {
+export const fetchOrganizationById = async (id: string) => {
+  const {
+    data: { organization }
+  } = await apiRequest.get<{ organization: Organization }>(`/api/v1/organization/${id}`);
+  return organization;
+};
+
+export const useGetOrganizationById = (id: string) => {
+  return useQuery({
+    queryKey: organizationKeys.getOrgById(id),
+    queryFn: async () => {
+      return fetchOrganizationById(id);
+    }
+  });
+};
+
+export const useCreateOrg = (options: { invalidate: boolean } = { invalidate: true }) => {
   const queryClient = useQueryClient();
 
   return useMutation({
@@ -60,20 +91,38 @@ export const useCreateOrg = () => {
       return organization;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries(organizationKeys.getUserOrganizations);
+      if (options?.invalidate) {
+        queryClient.invalidateQueries({ queryKey: organizationKeys.getUserOrganizations });
+      }
     }
   });
 };
 
-export const useRenameOrg = () => {
+export const useUpdateOrg = () => {
   const queryClient = useQueryClient();
-
-  return useMutation<{}, {}, RenameOrgDTO>({
-    mutationFn: ({ newOrgName, orgId }) => {
-      return apiRequest.patch(`/api/v1/organization/${orgId}/name`, { name: newOrgName });
+  return useMutation<object, object, UpdateOrgDTO>({
+    mutationFn: ({
+      name,
+      authEnforced,
+      scimEnabled,
+      slug,
+      orgId,
+      defaultMembershipRoleSlug,
+      enforceMfa,
+      selectedMfaMethod
+    }) => {
+      return apiRequest.patch(`/api/v1/organization/${orgId}`, {
+        name,
+        authEnforced,
+        scimEnabled,
+        slug,
+        defaultMembershipRoleSlug,
+        enforceMfa,
+        selectedMfaMethod
+      });
     },
     onSuccess: () => {
-      queryClient.invalidateQueries(organizationKeys.getUserOrganizations);
+      queryClient.invalidateQueries({ queryKey: organizationKeys.getUserOrganizations });
     }
   });
 };
@@ -177,7 +226,9 @@ export const useUpdateOrgBillingDetails = () => {
       return data;
     },
     onSuccess(_, dto) {
-      queryClient.invalidateQueries(organizationKeys.getOrgBillingDetails(dto.organizationId));
+      queryClient.invalidateQueries({
+        queryKey: organizationKeys.getOrgBillingDetails(dto.organizationId)
+      });
     }
   });
 };
@@ -222,7 +273,9 @@ export const useAddOrgPmtMethod = () => {
       return url;
     },
     onSuccess(_, dto) {
-      queryClient.invalidateQueries(organizationKeys.getOrgPmtMethods(dto.organizationId));
+      queryClient.invalidateQueries({
+        queryKey: organizationKeys.getOrgPmtMethods(dto.organizationId)
+      });
     }
   });
 };
@@ -245,7 +298,9 @@ export const useDeleteOrgPmtMethod = () => {
       return data;
     },
     onSuccess(_, dto) {
-      queryClient.invalidateQueries(organizationKeys.getOrgPmtMethods(dto.organizationId));
+      queryClient.invalidateQueries({
+        queryKey: organizationKeys.getOrgPmtMethods(dto.organizationId)
+      });
     }
   });
 };
@@ -288,7 +343,9 @@ export const useAddOrgTaxId = () => {
       return data;
     },
     onSuccess(_, dto) {
-      queryClient.invalidateQueries(organizationKeys.getOrgTaxIds(dto.organizationId));
+      queryClient.invalidateQueries({
+        queryKey: organizationKeys.getOrgTaxIds(dto.organizationId)
+      });
     }
   });
 };
@@ -305,7 +362,9 @@ export const useDeleteOrgTaxId = () => {
       return data;
     },
     onSuccess(_, dto) {
-      queryClient.invalidateQueries(organizationKeys.getOrgTaxIds(dto.organizationId));
+      queryClient.invalidateQueries({
+        queryKey: organizationKeys.getOrgTaxIds(dto.organizationId)
+      });
     }
   });
 };
@@ -328,7 +387,7 @@ export const useCreateCustomerPortalSession = () => {
   return useMutation({
     mutationFn: async (organizationId: string) => {
       const { data } = await apiRequest.post(
-        `/api/v1/organization/${organizationId}/customer-portal-session`
+        `/api/v1/organizations/${organizationId}/customer-portal-session`
       );
       return data;
     }
@@ -351,19 +410,51 @@ export const useGetOrgLicenses = (organizationId: string) => {
   });
 };
 
-export const useGetIdentityMembershipOrgs = (organizationId: string) => {
+export const useGetIdentityMembershipOrgs = (
+  {
+    organizationId,
+    offset = 0,
+    limit = 100,
+    orderBy = OrgIdentityOrderBy.Name,
+    orderDirection = OrderByDirection.ASC,
+    search = ""
+  }: TListOrgIdentitiesDTO,
+  options?: Omit<
+    UseQueryOptions<
+      TOrgIdentitiesList,
+      unknown,
+      TOrgIdentitiesList,
+      ReturnType<typeof organizationKeys.getOrgIdentityMembershipsWithParams>
+    >,
+    "queryKey" | "queryFn"
+  >
+) => {
+  const params = new URLSearchParams({
+    offset: String(offset),
+    limit: String(limit),
+    orderBy: String(orderBy),
+    orderDirection: String(orderDirection),
+    search: String(search)
+  });
   return useQuery({
-    queryKey: organizationKeys.getOrgIdentityMemberships(organizationId),
+    queryKey: organizationKeys.getOrgIdentityMembershipsWithParams({
+      organizationId,
+      offset,
+      limit,
+      orderBy,
+      orderDirection,
+      search
+    }),
     queryFn: async () => {
-      const {
-        data: { identityMemberships }
-      } = await apiRequest.get<{ identityMemberships: IdentityMembershipOrg[] }>(
-        `/api/v2/organizations/${organizationId}/identity-memberships`
+      const { data } = await apiRequest.get<TOrgIdentitiesList>(
+        `/api/v2/organizations/${organizationId}/identity-memberships`,
+        { params }
       );
 
-      return identityMemberships;
+      return data;
     },
-    enabled: true
+    enabled: true,
+    ...options
   });
 };
 
@@ -380,20 +471,68 @@ export const useDeleteOrgById = () => {
       return organization;
     },
     onSuccess(_, dto) {
-      queryClient.invalidateQueries(organizationKeys.getUserOrganizations);
-      queryClient.invalidateQueries(organizationKeys.getOrgPlanBillingInfo(dto.organizationId));
-      queryClient.invalidateQueries(organizationKeys.getOrgPlanTable(dto.organizationId));
-      queryClient.invalidateQueries(
-        organizationKeys.getOrgPlansTable(dto.organizationId, "monthly")
-      ); // You might need to invalidate for 'yearly' as well.
-      queryClient.invalidateQueries(
-        organizationKeys.getOrgPlansTable(dto.organizationId, "yearly")
-      );
-      queryClient.invalidateQueries(organizationKeys.getOrgBillingDetails(dto.organizationId));
-      queryClient.invalidateQueries(organizationKeys.getOrgPmtMethods(dto.organizationId));
-      queryClient.invalidateQueries(organizationKeys.getOrgTaxIds(dto.organizationId));
-      queryClient.invalidateQueries(organizationKeys.getOrgInvoices(dto.organizationId));
-      queryClient.invalidateQueries(organizationKeys.getOrgLicenses(dto.organizationId));
+      queryClient.invalidateQueries({ queryKey: organizationKeys.getUserOrganizations });
+      queryClient.invalidateQueries({
+        queryKey: organizationKeys.getOrgPlanBillingInfo(dto.organizationId)
+      });
+      queryClient.invalidateQueries({
+        queryKey: organizationKeys.getOrgPlanTable(dto.organizationId)
+      });
+      queryClient.invalidateQueries({
+        queryKey: organizationKeys.getOrgPlansTable(dto.organizationId, "monthly")
+      }); // You might need to invalidate for 'yearly' as well.
+      queryClient.invalidateQueries({
+        queryKey: organizationKeys.getOrgPlansTable(dto.organizationId, "yearly")
+      });
+      queryClient.invalidateQueries({
+        queryKey: organizationKeys.getOrgBillingDetails(dto.organizationId)
+      });
+      queryClient.invalidateQueries({
+        queryKey: organizationKeys.getOrgPmtMethods(dto.organizationId)
+      });
+      queryClient.invalidateQueries({
+        queryKey: organizationKeys.getOrgTaxIds(dto.organizationId)
+      });
+      queryClient.invalidateQueries({
+        queryKey: organizationKeys.getOrgInvoices(dto.organizationId)
+      });
+      queryClient.invalidateQueries({
+        queryKey: organizationKeys.getOrgLicenses(dto.organizationId)
+      });
     }
+  });
+};
+
+export const useGetOrganizationGroups = (organizationId: string) => {
+  return useQuery({
+    queryKey: organizationKeys.getOrgGroups(organizationId),
+    enabled: Boolean(organizationId),
+    queryFn: async () => {
+      const {
+        data: { groups }
+      } = await apiRequest.get<{ groups: TGroupOrgMembership[] }>(
+        `/api/v1/organization/${organizationId}/groups`
+      );
+
+      return groups;
+    }
+  });
+};
+
+export const useGetOrgIntegrationAuths = <TData = IntegrationAuth[],>(
+  organizationId: string,
+  select?: (data: IntegrationAuth[]) => TData
+) => {
+  return useQuery({
+    queryKey: organizationKeys.getOrgIntegrationAuths(organizationId),
+    queryFn: async () => {
+      const { data } = await apiRequest.get<{ authorizations: IntegrationAuth[] }>(
+        `/api/v1/organization/${organizationId}/integration-authorizations`
+      );
+
+      return data.authorizations;
+    },
+    enabled: Boolean(organizationId),
+    select
   });
 };
