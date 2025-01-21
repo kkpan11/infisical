@@ -1,27 +1,21 @@
-import {
-  useInfiniteQuery,
-  UseInfiniteQueryOptions,
-  useQuery,
-  UseQueryOptions
-} from "@tanstack/react-query";
+/* eslint-disable no-param-reassign */
+import { useInfiniteQuery, useQuery, UseQueryOptions } from "@tanstack/react-query";
 
 import {
   decryptAssymmetric,
   decryptSymmetric
 } from "@app/components/utilities/cryptography/crypto";
 import { apiRequest } from "@app/config/request";
+import { TReactQueryOptions } from "@app/types/reactQuery";
 
 import { UserWsKeyPair } from "../keys/types";
-import { decryptSecrets } from "../secrets/queries";
-import { DecryptedSecret } from "../secrets/types";
+import { EncryptedSecret, SecretType, SecretV3RawSanitized } from "../secrets/types";
 import {
-  CommitType,
   TGetSecretApprovalRequestCount,
   TGetSecretApprovalRequestDetails,
   TGetSecretApprovalRequestList,
   TSecretApprovalRequest,
-  TSecretApprovalRequestCount,
-  TSecretApprovalSecChangeData
+  TSecretApprovalRequestCount
 } from "./types";
 
 export const secretApprovalRequestKeys = {
@@ -45,8 +39,8 @@ export const secretApprovalRequestKeys = {
   ]
 };
 
-export const decryptSecretApprovalSecret = (
-  encSecret: TSecretApprovalSecChangeData,
+export const decryptSecrets = (
+  encryptedSecrets: EncryptedSecret[],
   decryptFileKey: UserWsKeyPair
 ) => {
   const PRIVATE_KEY = localStorage.getItem("PRIVATE_KEY") as string;
@@ -57,34 +51,64 @@ export const decryptSecretApprovalSecret = (
     privateKey: PRIVATE_KEY
   });
 
-  const secretKey = decryptSymmetric({
-    ciphertext: encSecret.secretKeyCiphertext,
-    iv: encSecret.secretKeyIV,
-    tag: encSecret.secretKeyTag,
-    key
+  const personalSecrets: Record<string, { id: string; value: string }> = {};
+  const secrets: SecretV3RawSanitized[] = [];
+  encryptedSecrets.forEach((encSecret) => {
+    const secretKey = decryptSymmetric({
+      ciphertext: encSecret.secretKeyCiphertext,
+      iv: encSecret.secretKeyIV,
+      tag: encSecret.secretKeyTag,
+      key
+    });
+
+    const secretValue = decryptSymmetric({
+      ciphertext: encSecret.secretValueCiphertext,
+      iv: encSecret.secretValueIV,
+      tag: encSecret.secretValueTag,
+      key
+    });
+
+    const secretComment = decryptSymmetric({
+      ciphertext: encSecret.secretCommentCiphertext,
+      iv: encSecret.secretCommentIV,
+      tag: encSecret.secretCommentTag,
+      key
+    });
+
+    const decryptedSecret: SecretV3RawSanitized = {
+      id: encSecret.id,
+      env: encSecret.environment,
+      key: secretKey,
+      value: secretValue,
+      tags: encSecret.tags,
+      comment: secretComment,
+      reminderRepeatDays: encSecret.secretReminderRepeatDays,
+      reminderNote: encSecret.secretReminderNote,
+      createdAt: encSecret.createdAt,
+      updatedAt: encSecret.updatedAt,
+      version: encSecret.version,
+      skipMultilineEncoding: encSecret.skipMultilineEncoding
+    };
+
+    if (encSecret.type === SecretType.Personal) {
+      personalSecrets[decryptedSecret.key] = {
+        id: encSecret.id,
+        value: secretValue
+      };
+    } else {
+      secrets.push(decryptedSecret);
+    }
   });
 
-  const secretValue = decryptSymmetric({
-    ciphertext: encSecret.secretValueCiphertext,
-    iv: encSecret.secretValueIV,
-    tag: encSecret.secretValueTag,
-    key
+  secrets.forEach((sec) => {
+    if (personalSecrets?.[sec.key]) {
+      sec.idOverride = personalSecrets[sec.key].id;
+      sec.valueOverride = personalSecrets[sec.key].value;
+      sec.overrideAction = "modified";
+    }
   });
 
-  const secretComment = decryptSymmetric({
-    ciphertext: encSecret.secretCommentCiphertext,
-    iv: encSecret.secretCommentIV,
-    tag: encSecret.secretCommentTag,
-    key
-  });
-  return {
-    id: encSecret.id,
-    version: encSecret.version,
-    secretKey,
-    secretValue,
-    secretComment,
-    tags: encSecret.tags
-  };
+  return secrets;
 };
 
 const fetchSecretApprovalRequestList = async ({
@@ -119,18 +143,9 @@ export const useGetSecretApprovalRequests = ({
   status,
   limit = 20,
   committer
-}: TGetSecretApprovalRequestList & {
-  options?: Omit<
-    UseInfiniteQueryOptions<
-      TSecretApprovalRequest[],
-      unknown,
-      TSecretApprovalRequest[],
-      ReturnType<typeof secretApprovalRequestKeys.list>
-    >,
-    "queryKey" | "queryFn"
-  >;
-}) =>
+}: TGetSecretApprovalRequestList & TReactQueryOptions) =>
   useInfiniteQuery({
+    initialPageParam: 0,
     queryKey: secretApprovalRequestKeys.list({
       workspaceId,
       environment,
@@ -166,14 +181,13 @@ const fetchSecretApprovalRequestDetails = async ({
 
 export const useGetSecretApprovalRequestDetails = ({
   id,
-  decryptKey,
   options = {}
 }: TGetSecretApprovalRequestDetails & {
   options?: Omit<
     UseQueryOptions<
       TSecretApprovalRequest,
       unknown,
-      TSecretApprovalRequest<DecryptedSecret>,
+      TSecretApprovalRequest,
       ReturnType<typeof secretApprovalRequestKeys.detail>
     >,
     "queryKey" | "queryFn"
@@ -182,17 +196,7 @@ export const useGetSecretApprovalRequestDetails = ({
   useQuery({
     queryKey: secretApprovalRequestKeys.detail({ id }),
     queryFn: () => fetchSecretApprovalRequestDetails({ id }),
-    select: (data) => ({
-      ...data,
-      commits: data.commits.map(({ secretVersion, op, secret, ...newVersion }) => ({
-        op,
-        secret,
-        secretVersion: secretVersion ? decryptSecrets([secretVersion], decryptKey)[0] : undefined,
-        newVersion:
-          op !== CommitType.DELETE ? decryptSecretApprovalSecret(newVersion, decryptKey) : undefined
-      }))
-    }),
-    enabled: Boolean(id && decryptKey) && (options?.enabled ?? true)
+    enabled: Boolean(id) && (options?.enabled ?? true)
   });
 
 const fetchSecretApprovalRequestCount = async ({ workspaceId }: TGetSecretApprovalRequestCount) => {
@@ -220,6 +224,7 @@ export const useGetSecretApprovalRequestCount = ({
 }) =>
   useQuery({
     queryKey: secretApprovalRequestKeys.count({ workspaceId }),
+    refetchInterval: 5000,
     queryFn: () => fetchSecretApprovalRequestCount({ workspaceId }),
     enabled: Boolean(workspaceId) && (options?.enabled ?? true)
   });

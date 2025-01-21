@@ -120,12 +120,33 @@ type PullSecretsByInfisicalTokenResponse struct {
 
 type GetWorkSpacesResponse struct {
 	Workspaces []struct {
-		ID           string `json:"_id"`
-		Name         string `json:"name"`
-		Plan         string `json:"plan,omitempty"`
-		V            int    `json:"__v"`
-		Organization string `json:"organization,omitempty"`
+		ID             string `json:"_id"`
+		Name           string `json:"name"`
+		Plan           string `json:"plan,omitempty"`
+		V              int    `json:"__v"`
+		OrganizationId string `json:"orgId"`
 	} `json:"workspaces"`
+}
+
+type GetProjectByIdResponse struct {
+	Project Project `json:"workspace"`
+}
+
+type GetOrganizationsResponse struct {
+	Organizations []struct {
+		ID   string `json:"id"`
+		Name string `json:"name"`
+	} `json:"organizations"`
+}
+
+type SelectOrganizationResponse struct {
+	Token      string `json:"token"`
+	MfaEnabled bool   `json:"isMfaEnabled"`
+	MfaMethod  string `json:"mfaMethod"`
+}
+
+type SelectOrganizationRequest struct {
+	OrganizationId string `json:"organizationId"`
 }
 
 type Secret struct {
@@ -144,6 +165,20 @@ type Secret struct {
 	Type                    string `json:"type,omitempty"`
 	ID                      string `json:"id,omitempty"`
 	PlainTextKey            string `json:"plainTextKey"`
+}
+
+type Project struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	Slug string `json:"slug"`
+}
+
+type RawSecret struct {
+	SecretKey     string `json:"secretKey,omitempty"`
+	SecretValue   string `json:"secretValue,omitempty"`
+	Type          string `json:"type,omitempty"`
+	SecretComment string `json:"secretComment,omitempty"`
+	ID            string `json:"id,omitempty"`
 }
 
 type GetEncryptedWorkspaceKeyRequest struct {
@@ -218,6 +253,7 @@ type GetLoginOneV2Response struct {
 type GetLoginTwoV2Request struct {
 	Email       string `json:"email"`
 	ClientProof string `json:"clientProof"`
+	Password    string `json:"password"`
 }
 
 type GetLoginTwoV2Response struct {
@@ -235,8 +271,9 @@ type GetLoginTwoV2Response struct {
 }
 
 type VerifyMfaTokenRequest struct {
-	Email    string `json:"email"`
-	MFAToken string `json:"mfaToken"`
+	Email     string `json:"email"`
+	MFAToken  string `json:"mfaToken"`
+	MFAMethod string `json:"mfaMethod"`
 }
 
 type VerifyMfaTokenResponse struct {
@@ -276,6 +313,7 @@ type GetEncryptedSecretsV3Request struct {
 	WorkspaceId   string `json:"workspaceId"`
 	SecretPath    string `json:"secretPath"`
 	IncludeImport bool   `json:"include_imports"`
+	Recursive     bool   `json:"recursive"`
 }
 
 type GetFoldersV1Request struct {
@@ -292,10 +330,10 @@ type GetFoldersV1Response struct {
 }
 
 type CreateFolderV1Request struct {
-	FolderName  string `json:"folderName"`
+	FolderName  string `json:"name"`
 	WorkspaceId string `json:"workspaceId"`
 	Environment string `json:"environment"`
-	Directory   string `json:"directory"`
+	Path        string `json:"path"`
 }
 
 type CreateFolderV1Response struct {
@@ -355,6 +393,22 @@ type ImportedSecretV3 struct {
 	Secrets     []EncryptedSecretV3 `json:"secrets"`
 }
 
+type ImportedRawSecretV3 struct {
+	SecretPath  string `json:"secretPath"`
+	Environment string `json:"environment"`
+	FolderId    string `json:"folderId"`
+	Secrets     []struct {
+		ID            string `json:"id"`
+		Workspace     string `json:"workspace"`
+		Environment   string `json:"environment"`
+		Version       int    `json:"version"`
+		Type          string `json:"type"`
+		SecretKey     string `json:"secretKey"`
+		SecretValue   string `json:"secretValue"`
+		SecretComment string `json:"secretComment"`
+	} `json:"secrets"`
+}
+
 type GetEncryptedSecretsV3Response struct {
 	Secrets         []EncryptedSecretV3 `json:"secrets"`
 	ImportedSecrets []ImportedSecretV3  `json:"imports,omitempty"`
@@ -377,16 +431,26 @@ type CreateSecretV3Request struct {
 	SecretPath              string `json:"secretPath"`
 }
 
+type CreateRawSecretV3Request struct {
+	SecretName            string `json:"-"`
+	WorkspaceID           string `json:"workspaceId"`
+	Type                  string `json:"type,omitempty"`
+	Environment           string `json:"environment"`
+	SecretPath            string `json:"secretPath,omitempty"`
+	SecretValue           string `json:"secretValue"`
+	SecretComment         string `json:"secretComment,omitempty"`
+	SkipMultilineEncoding bool   `json:"skipMultilineEncoding,omitempty"`
+}
+
 type DeleteSecretV3Request struct {
 	SecretName  string `json:"secretName"`
 	WorkspaceId string `json:"workspaceId"`
 	Environment string `json:"environment"`
-	Type        string `json:"type"`
-	SecretPath  string `json:"secretPath"`
+	Type        string `json:"type,omitempty"`
+	SecretPath  string `json:"secretPath,omitempty"`
 }
 
 type UpdateSecretByNameV3Request struct {
-	SecretName            string `json:"secretName"`
 	WorkspaceID           string `json:"workspaceId"`
 	Environment           string `json:"environment"`
 	Type                  string `json:"type"`
@@ -394,6 +458,15 @@ type UpdateSecretByNameV3Request struct {
 	SecretValueCiphertext string `json:"secretValueCiphertext"`
 	SecretValueIV         string `json:"secretValueIV"`
 	SecretValueTag        string `json:"secretValueTag"`
+}
+
+type UpdateRawSecretByNameV3Request struct {
+	SecretName  string `json:"-"`
+	WorkspaceID string `json:"workspaceId"`
+	Environment string `json:"environment"`
+	SecretPath  string `json:"secretPath,omitempty"`
+	SecretValue string `json:"secretValue"`
+	Type        string `json:"type,omitempty"`
 }
 
 type GetSingleSecretByNameV3Request struct {
@@ -486,11 +559,36 @@ type UniversalAuthRefreshResponse struct {
 	AccessTokenMaxTTL int    `json:"accessTokenMaxTTL"`
 }
 
+type CreateDynamicSecretLeaseV1Request struct {
+	Environment string `json:"environment"`
+	ProjectSlug string `json:"projectSlug"`
+	SecretPath  string `json:"secretPath,omitempty"`
+	Slug        string `json:"slug"`
+	TTL         string `json:"ttl,omitempty"`
+}
+
+type CreateDynamicSecretLeaseV1Response struct {
+	Lease struct {
+		Id       string    `json:"id"`
+		ExpireAt time.Time `json:"expireAt"`
+	} `json:"lease"`
+	DynamicSecret struct {
+		Id         string `json:"id"`
+		DefaultTTL string `json:"defaultTTL"`
+		MaxTTL     string `json:"maxTTL"`
+		Type       string `json:"type"`
+	} `json:"dynamicSecret"`
+	Data map[string]interface{} `json:"data"`
+}
+
 type GetRawSecretsV3Request struct {
-	Environment   string `json:"environment"`
-	WorkspaceId   string `json:"workspaceId"`
-	SecretPath    string `json:"secretPath"`
-	IncludeImport bool   `json:"include_imports"`
+	Environment            string `json:"environment"`
+	WorkspaceId            string `json:"workspaceId"`
+	SecretPath             string `json:"secretPath"`
+	IncludeImport          bool   `json:"include_imports"`
+	Recursive              bool   `json:"recursive"`
+	TagSlugs               string `json:"tagSlugs,omitempty"`
+	ExpandSecretReferences bool   `json:"expandSecretReferences,omitempty"`
 }
 
 type GetRawSecretsV3Response struct {
@@ -503,6 +601,31 @@ type GetRawSecretsV3Response struct {
 		SecretKey     string `json:"secretKey"`
 		SecretValue   string `json:"secretValue"`
 		SecretComment string `json:"secretComment"`
+		SecretPath    string `json:"secretPath"`
 	} `json:"secrets"`
-	Imports []any `json:"imports"`
+	Imports []ImportedRawSecretV3 `json:"imports"`
+	ETag    string
+}
+
+type GetRawSecretV3ByNameRequest struct {
+	SecretName  string `json:"secretName"`
+	WorkspaceID string `json:"workspaceId"`
+	Type        string `json:"type,omitempty"`
+	Environment string `json:"environment"`
+	SecretPath  string `json:"secretPath,omitempty"`
+}
+
+type GetRawSecretV3ByNameResponse struct {
+	Secret struct {
+		ID            string `json:"_id"`
+		Version       int    `json:"version"`
+		Workspace     string `json:"workspace"`
+		Type          string `json:"type"`
+		Environment   string `json:"environment"`
+		SecretKey     string `json:"secretKey"`
+		SecretValue   string `json:"secretValue"`
+		SecretComment string `json:"secretComment"`
+		SecretPath    string `json:"secretPath"`
+	} `json:"secret"`
+	ETag string
 }

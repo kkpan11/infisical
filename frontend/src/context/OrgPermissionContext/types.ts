@@ -13,10 +13,22 @@ export enum OrgPermissionSubjects {
   Member = "member",
   Settings = "settings",
   IncidentAccount = "incident-contact",
+  Scim = "scim",
   Sso = "sso",
+  Ldap = "ldap",
+  Groups = "groups",
   Billing = "billing",
   SecretScanning = "secret-scanning",
-  Identity = "identity"
+  Identity = "identity",
+  Kms = "kms",
+  AdminConsole = "organization-admin-console",
+  AuditLogs = "audit-logs",
+  ProjectTemplates = "project-templates",
+  AppConnections = "app-connections"
+}
+
+export enum OrgPermissionAdminConsoleAction {
+  AccessAllProjects = "access-all-projects"
 }
 
 export type OrgPermissionSet =
@@ -26,9 +38,17 @@ export type OrgPermissionSet =
   | [OrgPermissionActions, OrgPermissionSubjects.Member]
   | [OrgPermissionActions, OrgPermissionSubjects.Settings]
   | [OrgPermissionActions, OrgPermissionSubjects.IncidentAccount]
+  | [OrgPermissionActions, OrgPermissionSubjects.Scim]
   | [OrgPermissionActions, OrgPermissionSubjects.Sso]
+  | [OrgPermissionActions, OrgPermissionSubjects.Ldap]
+  | [OrgPermissionActions, OrgPermissionSubjects.Groups]
   | [OrgPermissionActions, OrgPermissionSubjects.SecretScanning]
   | [OrgPermissionActions, OrgPermissionSubjects.Billing]
-  | [OrgPermissionActions, OrgPermissionSubjects.Identity];
+  | [OrgPermissionActions, OrgPermissionSubjects.Identity]
+  | [OrgPermissionActions, OrgPermissionSubjects.Kms]
+  | [OrgPermissionAdminConsoleAction, OrgPermissionSubjects.AdminConsole]
+  | [OrgPermissionActions, OrgPermissionSubjects.AuditLogs]
+  | [OrgPermissionActions, OrgPermissionSubjects.ProjectTemplates]
+  | [OrgPermissionActions, OrgPermissionSubjects.AppConnections];
 
 export type TOrgPermission = MongoAbility<OrgPermissionSet>;

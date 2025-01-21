@@ -1,1 +1,10 @@
 .github/resources/docker-compose.be-test.yml:generic-api-key:16
+frontend/src/views/Project/MembersPage/components/IdentityTab/components/IdentityRoleForm/IdentityRbacSection.tsx:generic-api-key:206
+frontend/src/views/Project/MembersPage/components/IdentityTab/components/IdentityRoleForm/SpecificPrivilegeSection.tsx:generic-api-key:304
+frontend/src/views/Project/MembersPage/components/MemberListTab/MemberRoleForm/MemberRbacSection.tsx:generic-api-key:206
+frontend/src/views/Project/MembersPage/components/MemberListTab/MemberRoleForm/SpecificPrivilegeSection.tsx:generic-api-key:292
+docs/self-hosting/configuration/envars.mdx:generic-api-key:106
+frontend/src/views/Project/MembersPage/components/MemberListTab/MemberRoleForm/SpecificPrivilegeSection.tsx:generic-api-key:451
+docs/mint.json:generic-api-key:651
+backend/src/ee/services/hsm/hsm-service.ts:generic-api-key:134
+docs/documentation/platform/audit-log-streams/audit-log-streams.mdx:generic-api-key:104

@@ -40,8 +40,9 @@ export type TPermission = {
 
 export type TProjectPermission = {
   conditions?: Record<string, any>;
-  action: string;
-  subject: [string];
+  inverted?: boolean;
+  action: string | string[];
+  subject: string | string[];
 };
 
 export type TGetUserOrgPermissionsDTO = {

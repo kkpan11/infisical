@@ -1,3 +1,4 @@
+export { useDuplicateIntegrationAuth } from "./mutations";
 export {
   useAuthorizeIntegration,
   useDeleteIntegrationAuth,
@@ -6,6 +7,9 @@ export {
   useGetIntegrationAuthBitBucketWorkspaces,
   useGetIntegrationAuthById,
   useGetIntegrationAuthChecklyGroups,
+  useGetIntegrationAuthCircleCIOrganizations,
+  useGetIntegrationAuthGithubEnvs,
+  useGetIntegrationAuthGithubOrgs,
   useGetIntegrationAuthNorthflankSecretGroups,
   useGetIntegrationAuthRailwayEnvironments,
   useGetIntegrationAuthRailwayServices,

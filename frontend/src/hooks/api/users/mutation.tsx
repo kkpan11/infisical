@@ -6,13 +6,14 @@ import {
 } from "@app/components/utilities/cryptography/crypto";
 import { apiRequest } from "@app/config/request";
 
-import { workspaceKeys } from "../workspace/queries";
-import { AddUserToWsDTO } from "./types";
+import { workspaceKeys } from "../workspace";
+import { userKeys } from "./query-keys";
+import { AddUserToWsDTOE2EE, AddUserToWsDTONonE2EE } from "./types";
 
-export const useAddUserToWs = () => {
+export const useAddUserToWsE2EE = () => {
   const queryClient = useQueryClient();
 
-  return useMutation<{}, {}, AddUserToWsDTO>({
+  return useMutation<object, object, AddUserToWsDTOE2EE>({
     mutationFn: async ({ workspaceId, members, decryptKey, userPrivateKey }) => {
       // assymmetrically decrypt symmetric key with local private key
       const key = decryptAssymmetric({
@@ -41,7 +42,132 @@ export const useAddUserToWs = () => {
       return data;
     },
     onSuccess: (_, { workspaceId }) => {
-      queryClient.invalidateQueries(workspaceKeys.getWorkspaceUsers(workspaceId));
+      queryClient.invalidateQueries({ queryKey: workspaceKeys.getWorkspaceUsers(workspaceId) });
+    }
+  });
+};
+
+export const useAddUserToWsNonE2EE = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation<object, object, AddUserToWsDTONonE2EE>({
+    mutationFn: async ({ projectId, usernames, roleSlugs }) => {
+      const { data } = await apiRequest.post(`/api/v2/workspace/${projectId}/memberships`, {
+        usernames,
+        roleSlugs
+      });
+      return data;
+    },
+    onSuccess: (_, { orgId, projectId }) => {
+      queryClient.invalidateQueries({ queryKey: workspaceKeys.getWorkspaceUsers(projectId) });
+      queryClient.invalidateQueries({
+        queryKey: userKeys.allOrgMembershipProjectMemberships(orgId)
+      });
+    }
+  });
+};
+
+export const sendEmailVerificationCode = async (username: string) => {
+  return apiRequest.post("/api/v2/users/me/emails/code", {
+    username
+  });
+};
+
+export const useSendEmailVerificationCode = () => {
+  return useMutation({
+    mutationFn: async (username: string) => {
+      await sendEmailVerificationCode(username);
+      return {};
+    }
+  });
+};
+
+export const useVerifyEmailVerificationCode = () => {
+  return useMutation({
+    mutationFn: async ({ username, code }: { username: string; code: string }) => {
+      await apiRequest.post("/api/v2/users/me/emails/verify", {
+        username,
+        code
+      });
+      return {};
+    }
+  });
+};
+
+export const useUpdateUserProjectFavorites = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      orgId,
+      projectFavorites
+    }: {
+      orgId: string;
+      projectFavorites: string[];
+    }) => {
+      await apiRequest.put("/api/v1/user/me/project-favorites", {
+        orgId,
+        projectFavorites
+      });
+
+      return {};
+    },
+    onSuccess: (_, { orgId }) => {
+      queryClient.invalidateQueries({ queryKey: userKeys.userProjectFavorites(orgId) });
+    }
+  });
+};
+
+export const useVerifyUserTotpRegistration = () => {
+  return useMutation({
+    mutationFn: async ({ totp }: { totp: string }) => {
+      await apiRequest.post("/api/v1/user/me/totp/verify", {
+        totp
+      });
+
+      return {};
+    }
+  });
+};
+
+export const useDeleteUserTotpConfiguration = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async () => {
+      await apiRequest.delete("/api/v1/user/me/totp");
+
+      return {};
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: userKeys.totpConfiguration });
+    }
+  });
+};
+
+export const useCreateNewTotpRecoveryCodes = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async () => {
+      await apiRequest.post("/api/v1/user/me/totp/recovery-codes");
+
+      return {};
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: userKeys.totpConfiguration });
+    }
+  });
+};
+
+export const useResendOrgMemberInvitation = () => {
+  return useMutation({
+    mutationFn: async (dto: { membershipId: string }) => {
+      const { data } = await apiRequest.post<{
+        signupToken?: {
+          email: string;
+          link: string;
+        };
+      }>("/api/v1/invite-org/signup-resend", dto);
+
+      return data.signupToken;
     }
   });
 };
