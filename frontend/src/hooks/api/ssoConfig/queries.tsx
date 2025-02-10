@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { apiRequest } from "@app/config/request";
+import { organizationKeys } from "@app/hooks/api/organization/queries";
 
 const ssoConfigKeys = {
   getSSOConfig: (orgId: string) => [{ orgId }, "organization-saml-sso"] as const
@@ -10,9 +11,15 @@ export const useGetSSOConfig = (organizationId: string) => {
   return useQuery({
     queryKey: ssoConfigKeys.getSSOConfig(organizationId),
     queryFn: async () => {
-      const { data } = await apiRequest.get(`/api/v1/sso/config?organizationId=${organizationId}`);
+      try {
+        const { data } = await apiRequest.get(
+          `/api/v1/sso/config?organizationId=${organizationId}`
+        );
 
-      return data;
+        return data;
+      } catch {
+        return null;
+      }
     },
     enabled: true
   });
@@ -48,7 +55,7 @@ export const useCreateSSOConfig = () => {
       return data;
     },
     onSuccess(_, dto) {
-      queryClient.invalidateQueries(ssoConfigKeys.getSSOConfig(dto.organizationId));
+      queryClient.invalidateQueries({ queryKey: ssoConfigKeys.getSSOConfig(dto.organizationId) });
     }
   });
 };
@@ -82,8 +89,12 @@ export const useUpdateSSOConfig = () => {
 
       return data;
     },
-    onSuccess(_, dto) {
-      queryClient.invalidateQueries(ssoConfigKeys.getSSOConfig(dto.organizationId));
+    onSuccess(_, { organizationId, isActive }) {
+      if (isActive === false) {
+        queryClient.invalidateQueries({ queryKey: organizationKeys.getUserOrganizations });
+      }
+
+      queryClient.invalidateQueries({ queryKey: ssoConfigKeys.getSSOConfig(organizationId) });
     }
   });
 };

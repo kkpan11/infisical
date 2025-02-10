@@ -1,9 +1,10 @@
-import argon2 from "argon2-browser";
+// @ts-expect-error to avoid wasm dependencies
+// eslint-disable-next-line
+import argon2 from "argon2-browser/dist/argon2-bundled.min.js";
+import nacl from "tweetnacl";
+import { decodeBase64, decodeUTF8, encodeBase64, encodeUTF8 } from "tweetnacl-util";
 
 import aes from "./aes-256-gcm";
-
-const nacl = require("tweetnacl");
-nacl.util = require("tweetnacl-util");
 
 /**
  * Return new base64, NaCl, public-private key pair.
@@ -13,12 +14,12 @@ nacl.util = require("tweetnacl-util");
  */
 const generateKeyPair = () => {
   const pair = nacl.box.keyPair();
-  
-  return ({
-		publicKey: nacl.util.encodeBase64(pair.publicKey),
-		privateKey: nacl.util.encodeBase64(pair.secretKey)
-  });
-}
+
+  return {
+    publicKey: encodeBase64(pair.publicKey),
+    privateKey: encodeBase64(pair.secretKey)
+  };
+};
 
 type EncryptAsymmetricProps = {
   plaintext: string;
@@ -29,27 +30,19 @@ type EncryptAsymmetricProps = {
 /**
  * Verify that private key [privateKey] is the one that corresponds to
  * the public key [publicKey]
- * @param {Object} 
+ * @param {Object}
  * @param {String} - base64-encoded Nacl private key
  * @param {String} - base64-encoded Nacl public key
  */
-const verifyPrivateKey = ({
-  privateKey,
-  publicKey
-}: {
-  privateKey: string;
-  publicKey: string;
-}) => {
-  const derivedPublicKey = nacl.util.encodeBase64(
-    nacl.box.keyPair.fromSecretKey(
-      nacl.util.decodeBase64(privateKey)
-    ).publicKey
+const verifyPrivateKey = ({ privateKey, publicKey }: { privateKey: string; publicKey: string }) => {
+  const derivedPublicKey = encodeBase64(
+    nacl.box.keyPair.fromSecretKey(decodeBase64(privateKey)).publicKey
   );
-  
+
   if (derivedPublicKey !== publicKey) {
     throw new Error("Failed to verify private key");
   }
-}
+};
 
 /**
  * Derive a key from password [password] and salt [salt] using Argon2id
@@ -116,15 +109,15 @@ const encryptAssymmetric = ({
 } => {
   const nonce = nacl.randomBytes(24);
   const ciphertext = nacl.box(
-    nacl.util.decodeUTF8(plaintext),
+    decodeUTF8(plaintext),
     nonce,
-    nacl.util.decodeBase64(publicKey),
-    nacl.util.decodeBase64(privateKey)
+    decodeBase64(publicKey),
+    decodeBase64(privateKey)
   );
 
   return {
-    ciphertext: nacl.util.encodeBase64(ciphertext),
-    nonce: nacl.util.encodeBase64(nonce)
+    ciphertext: encodeBase64(ciphertext),
+    nonce: encodeBase64(nonce)
   };
 };
 
@@ -151,13 +144,13 @@ const decryptAssymmetric = ({
   privateKey
 }: DecryptAsymmetricProps): string => {
   const plaintext = nacl.box.open(
-    nacl.util.decodeBase64(ciphertext),
-    nacl.util.decodeBase64(nonce),
-    nacl.util.decodeBase64(publicKey),
-    nacl.util.decodeBase64(privateKey)
+    decodeBase64(ciphertext),
+    decodeBase64(nonce),
+    decodeBase64(publicKey),
+    decodeBase64(privateKey)
   );
 
-  return nacl.util.encodeUTF8(plaintext);
+  return encodeUTF8(plaintext!);
 };
 
 type EncryptSymmetricProps = {
@@ -218,7 +211,14 @@ const decryptSymmetric = ({ ciphertext, iv, tag, key }: DecryptSymmetricProps): 
   try {
     plaintext = aes.decrypt({ ciphertext, iv, tag, secret: key });
   } catch (err) {
-    console.log("Failed to perform decryption");
+    console.log("Failed to decrypt with the following parameters", {
+      ciphertext,
+      iv,
+      tag,
+      key
+    });
+    console.log("Failed to perform decryption", err);
+
     process.exit(1);
   }
 
@@ -229,7 +229,8 @@ export {
   decryptAssymmetric,
   decryptSymmetric,
   deriveArgonKey,
-  encryptAssymmetric, 
+  encryptAssymmetric,
   encryptSymmetric,
   generateKeyPair,
-  verifyPrivateKey};
+  verifyPrivateKey
+};

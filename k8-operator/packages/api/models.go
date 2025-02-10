@@ -1,6 +1,10 @@
 package api
 
-import "time"
+import (
+	"time"
+
+	"github.com/Infisical/infisical/k8-operator/packages/model"
+)
 
 type GetEncryptedWorkspaceKeyRequest struct {
 	WorkspaceId string `json:"workspaceId"`
@@ -31,6 +35,7 @@ type GetEncryptedWorkspaceKeyResponse struct {
 type GetEncryptedSecretsV3Request struct {
 	Environment   string `json:"environment"`
 	WorkspaceId   string `json:"workspaceId"`
+	Recursive     bool   `json:"recursive"`
 	SecretPath    string `json:"secretPath"`
 	IncludeImport bool   `json:"include_imports"`
 	ETag          string `json:"etag,omitempty"`
@@ -65,6 +70,17 @@ type EncryptedSecretV3 struct {
 	UpdatedAt               time.Time `json:"updatedAt"`
 }
 
+type DecryptedSecretV3 struct {
+	ID            string `json:"id"`
+	Workspace     string `json:"workspace"`
+	Environment   string `json:"environment"`
+	Version       int    `json:"version"`
+	Type          string `json:"string"`
+	SecretKey     string `json:"secretKey"`
+	SecretValue   string `json:"secretValue"`
+	SecretComment string `json:"secretComment"`
+}
+
 type ImportedSecretV3 struct {
 	Environment string              `json:"environment"`
 	FolderId    string              `json:"folderId"`
@@ -72,11 +88,35 @@ type ImportedSecretV3 struct {
 	Secrets     []EncryptedSecretV3 `json:"secrets"`
 }
 
+type ImportedRawSecretV3 struct {
+	Environment string              `json:"environment"`
+	FolderId    string              `json:"folderId"`
+	SecretPath  string              `json:"secretPath"`
+	Secrets     []DecryptedSecretV3 `json:"secrets"`
+}
+
 type GetEncryptedSecretsV3Response struct {
 	Secrets         []EncryptedSecretV3 `json:"secrets"`
 	ImportedSecrets []ImportedSecretV3  `json:"imports,omitempty"`
 	Modified        bool                `json:"modified,omitempty"`
 	ETag            string              `json:"ETag,omitempty"`
+}
+
+type GetDecryptedSecretsV3Response struct {
+	Secrets  []DecryptedSecretV3   `json:"secrets"`
+	ETag     string                `json:"ETag,omitempty"`
+	Modified bool                  `json:"modified,omitempty"`
+	Imports  []ImportedRawSecretV3 `json:"imports,omitempty"`
+}
+
+type GetDecryptedSecretsV3Request struct {
+	ProjectID              string `json:"workspaceId"`
+	ProjectSlug            string `json:"workspaceSlug"`
+	Environment            string `json:"environment"`
+	SecretPath             string `json:"secretPath"`
+	Recursive              bool   `json:"recursive"`
+	ExpandSecretReferences bool   `json:"expandSecretReferences"`
+	ETag                   string `json:"etag,omitempty"`
 }
 
 type GetServiceTokenDetailsResponse struct {
@@ -99,6 +139,13 @@ type ServiceAccountDetailsResponse struct {
 		LastUsed     time.Time `json:"lastUsed"`
 		ExpiresAt    time.Time `json:"expiresAt"`
 	} `json:"serviceAccount"`
+}
+
+type MachineIdentityDetailsResponse struct {
+	AccessToken       string `json:"accessToken"`
+	ExpiresIn         int    `json:"expiresIn"`
+	AccessTokenMaxTTL int    `json:"accessTokenMaxTTL"`
+	TokenType         string `json:"tokenType"`
 }
 
 type ServiceAccountWorkspacePermission struct {
@@ -128,6 +175,15 @@ type GetServiceAccountKeysRequest struct {
 	ServiceAccountId string `json:"id"`
 }
 
+type MachineIdentityUniversalAuthLoginRequest struct {
+	ClientId     string `json:"clientId"`
+	ClientSecret string `json:"clientSecret"`
+}
+
+type MachineIdentityUniversalAuthRefreshRequest struct {
+	AccessToken string `json:"accessToken"`
+}
+
 type ServiceAccountKey struct {
 	ID             string    `json:"_id"`
 	EncryptedKey   string    `json:"encryptedKey"`
@@ -141,4 +197,12 @@ type ServiceAccountKey struct {
 
 type GetServiceAccountKeysResponse struct {
 	ServiceAccountKeys []ServiceAccountKey `json:"serviceAccountKeys"`
+}
+
+type GetProjectByIDRequest struct {
+	ProjectID string
+}
+
+type GetProjectByIDResponse struct {
+	Project model.Project `json:"workspace"`
 }

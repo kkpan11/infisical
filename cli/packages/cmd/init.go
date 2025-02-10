@@ -41,7 +41,7 @@ var initCmd = &cobra.Command{
 			}
 		}
 
-		userCreds, err := util.GetCurrentLoggedInUserDetails()
+		userCreds, err := util.GetCurrentLoggedInUserDetails(true)
 		if err != nil {
 			util.HandleError(err, "Unable to get your login details")
 		}
@@ -52,25 +52,19 @@ var initCmd = &cobra.Command{
 
 		httpClient := resty.New()
 		httpClient.SetAuthToken(userCreds.UserCredentials.JTWToken)
-		workspaceResponse, err := api.CallGetAllWorkSpacesUserBelongsTo(httpClient)
+
+		organizationResponse, err := api.CallGetAllOrganizations(httpClient)
 		if err != nil {
-			util.HandleError(err, "Unable to pull projects that belong to you")
+			util.HandleError(err, "Unable to pull organizations that belong to you")
 		}
 
-		workspaces := workspaceResponse.Workspaces
-		if len(workspaces) == 0 {
-			message := fmt.Sprintf("You don't have any projects created in Infisical. You must first create a project at %s", util.INFISICAL_TOKEN_NAME)
-			util.PrintErrorMessageAndExit(message)
-		}
+		organizations := organizationResponse.Organizations
 
-		var workspaceNames []string
-		for _, workspace := range workspaces {
-			workspaceNames = append(workspaceNames, workspace.Name)
-		}
+		organizationNames := util.GetOrganizationsNameList(organizationResponse)
 
 		prompt := promptui.Select{
-			Label: "Which of your Infisical projects would you like to connect this project to?",
-			Items: workspaceNames,
+			Label: "Which Infisical organization would you like to select a project from?",
+			Items: organizationNames,
 			Size:  7,
 		}
 
@@ -79,7 +73,79 @@ var initCmd = &cobra.Command{
 			util.HandleError(err)
 		}
 
-		err = writeWorkspaceFile(workspaces[index])
+		selectedOrganization := organizations[index]
+
+		tokenResponse, err := api.CallSelectOrganization(httpClient, api.SelectOrganizationRequest{OrganizationId: selectedOrganization.ID})
+		if tokenResponse.MfaEnabled {
+			i := 1
+			for i < 6 {
+				mfaVerifyCode := askForMFACode(tokenResponse.MfaMethod)
+
+				httpClient := resty.New()
+				httpClient.SetAuthToken(tokenResponse.Token)
+				verifyMFAresponse, mfaErrorResponse, requestError := api.CallVerifyMfaToken(httpClient, api.VerifyMfaTokenRequest{
+					Email:     userCreds.UserCredentials.Email,
+					MFAToken:  mfaVerifyCode,
+					MFAMethod: tokenResponse.MfaMethod,
+				})
+				if requestError != nil {
+					util.HandleError(err)
+					break
+				} else if mfaErrorResponse != nil {
+					if mfaErrorResponse.Context.Code == "mfa_invalid" {
+						msg := fmt.Sprintf("Incorrect, verification code. You have %v attempts left", 5-i)
+						fmt.Println(msg)
+						if i == 5 {
+							util.PrintErrorMessageAndExit("No tries left, please try again in a bit")
+							break
+						}
+					}
+
+					if mfaErrorResponse.Context.Code == "mfa_expired" {
+						util.PrintErrorMessageAndExit("Your 2FA verification code has expired, please try logging in again")
+						break
+					}
+					i++
+				} else {
+					httpClient.SetAuthToken(verifyMFAresponse.Token)
+					tokenResponse, err = api.CallSelectOrganization(httpClient, api.SelectOrganizationRequest{OrganizationId: selectedOrganization.ID})
+					break
+				}
+			}
+		}
+
+		if err != nil {
+			util.HandleError(err, "Unable to select organization")
+		}
+
+		// set the config jwt token to the new token
+		userCreds.UserCredentials.JTWToken = tokenResponse.Token
+		err = util.StoreUserCredsInKeyRing(&userCreds.UserCredentials)
+		httpClient.SetAuthToken(tokenResponse.Token)
+
+		if err != nil {
+			util.HandleError(err, "Unable to store your user credentials")
+		}
+
+		workspaceResponse, err := api.CallGetAllWorkSpacesUserBelongsTo(httpClient)
+		if err != nil {
+			util.HandleError(err, "Unable to pull projects that belong to you")
+		}
+
+		filteredWorkspaces, workspaceNames := util.GetWorkspacesInOrganization(workspaceResponse, selectedOrganization.ID)
+
+		prompt = promptui.Select{
+			Label: "Which of your Infisical projects would you like to connect this project to?",
+			Items: workspaceNames,
+			Size:  7,
+		}
+
+		index, _, err = prompt.Run()
+		if err != nil {
+			util.HandleError(err)
+		}
+
+		err = writeWorkspaceFile(filteredWorkspaces[index])
 		if err != nil {
 			util.HandleError(err)
 		}

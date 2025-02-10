@@ -7,12 +7,14 @@ import (
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/Infisical/infisical-merge/packages/models"
 	"github.com/Infisical/infisical-merge/packages/util"
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/cobra"
+	"gopkg.in/yaml.v2"
 )
 
 const (
@@ -44,9 +46,19 @@ var exportCmd = &cobra.Command{
 			util.HandleError(err)
 		}
 
+		includeImports, err := cmd.Flags().GetBool("include-imports")
+		if err != nil {
+			util.HandleError(err)
+		}
+
 		projectId, err := cmd.Flags().GetString("projectId")
 		if err != nil {
 			util.HandleError(err)
+		}
+
+		token, err := util.GetInfisicalToken(cmd)
+		if err != nil {
+			util.HandleError(err, "Unable to parse flag")
 		}
 
 		format, err := cmd.Flags().GetString("format")
@@ -54,12 +66,12 @@ var exportCmd = &cobra.Command{
 			util.HandleError(err)
 		}
 
-		secretOverriding, err := cmd.Flags().GetBool("secret-overriding")
+		templatePath, err := cmd.Flags().GetString("template")
 		if err != nil {
-			util.HandleError(err, "Unable to parse flag")
+			util.HandleError(err)
 		}
 
-		infisicalToken, err := cmd.Flags().GetString("token")
+		secretOverriding, err := cmd.Flags().GetBool("secret-overriding")
 		if err != nil {
 			util.HandleError(err, "Unable to parse flag")
 		}
@@ -74,7 +86,47 @@ var exportCmd = &cobra.Command{
 			util.HandleError(err, "Unable to parse flag")
 		}
 
-		secrets, err := util.GetAllEnvironmentVariables(models.GetAllSecretsParameters{Environment: environmentName, InfisicalToken: infisicalToken, TagSlugs: tagSlugs, WorkspaceId: projectId, SecretsPath: secretsPath}, "")
+		request := models.GetAllSecretsParameters{
+			Environment:            environmentName,
+			TagSlugs:               tagSlugs,
+			WorkspaceId:            projectId,
+			SecretsPath:            secretsPath,
+			IncludeImport:          includeImports,
+			ExpandSecretReferences: shouldExpandSecrets,
+		}
+
+		if token != nil && token.Type == util.SERVICE_TOKEN_IDENTIFIER {
+			request.InfisicalToken = token.Token
+		} else if token != nil && token.Type == util.UNIVERSAL_AUTH_TOKEN_IDENTIFIER {
+			request.UniversalAuthAccessToken = token.Token
+		}
+
+		if templatePath != "" {
+			sigChan := make(chan os.Signal, 1)
+			dynamicSecretLeases := NewDynamicSecretLeaseManager(sigChan)
+			newEtag := ""
+
+			accessToken := ""
+			if token != nil {
+				accessToken = token.Token
+			} else {
+				log.Debug().Msg("GetAllEnvironmentVariables: Trying to fetch secrets using logged in details")
+				loggedInUserDetails, err := util.GetCurrentLoggedInUserDetails(true)
+				if err != nil {
+					util.HandleError(err)
+				}
+				accessToken = loggedInUserDetails.UserCredentials.JTWToken
+			}
+
+			processedTemplate, err := ProcessTemplate(1, templatePath, nil, accessToken, "", &newEtag, dynamicSecretLeases)
+			if err != nil {
+				util.HandleError(err)
+			}
+			fmt.Print(processedTemplate.String())
+			return
+		}
+
+		secrets, err := util.GetAllEnvironmentVariables(request, "")
 		if err != nil {
 			util.HandleError(err, "Unable to fetch secrets")
 		}
@@ -86,17 +138,12 @@ var exportCmd = &cobra.Command{
 		}
 
 		var output string
-		if shouldExpandSecrets {
-			substitutions := util.ExpandSecrets(secrets, infisicalToken, "")
-			output, err = formatEnvs(substitutions, format)
-			if err != nil {
-				util.HandleError(err)
-			}
-		} else {
-			output, err = formatEnvs(secrets, format)
-			if err != nil {
-				util.HandleError(err)
-			}
+		secrets = util.FilterSecretsByTag(secrets, tagSlugs)
+		secrets = util.SortSecretsByKeys(secrets)
+
+		output, err = formatEnvs(secrets, format)
+		if err != nil {
+			util.HandleError(err)
 		}
 
 		fmt.Print(output)
@@ -111,10 +158,12 @@ func init() {
 	exportCmd.Flags().Bool("expand", true, "Parse shell parameter expansions in your secrets")
 	exportCmd.Flags().StringP("format", "f", "dotenv", "Set the format of the output file (dotenv, json, csv)")
 	exportCmd.Flags().Bool("secret-overriding", true, "Prioritizes personal secrets, if any, with the same name over shared secrets")
-	exportCmd.Flags().String("token", "", "Fetch secrets using the Infisical Token")
+	exportCmd.Flags().Bool("include-imports", true, "Imported linked secrets")
+	exportCmd.Flags().String("token", "", "Fetch secrets using service token or machine identity access token")
 	exportCmd.Flags().StringP("tags", "t", "", "filter secrets by tag slugs")
-	exportCmd.Flags().String("projectId", "", "manually set the projectId to fetch secrets from")
+	exportCmd.Flags().String("projectId", "", "manually set the projectId to export secrets from")
 	exportCmd.Flags().String("path", "/", "get secrets within a folder path")
+	exportCmd.Flags().String("template", "", "The path to the template file used to render secrets")
 }
 
 // Format according to the format flag
@@ -129,7 +178,7 @@ func formatEnvs(envs []models.SingleEnvironmentVariable, format string) (string,
 	case FormatCSV:
 		return formatAsCSV(envs), nil
 	case FormatYaml:
-		return formatAsYaml(envs), nil
+		return formatAsYaml(envs)
 	default:
 		return "", fmt.Errorf("invalid format type: %s. Available format types are [%s]", format, []string{FormatDotenv, FormatJson, FormatCSV, FormatYaml, FormatDotEnvExport})
 	}
@@ -165,12 +214,18 @@ func formatAsDotEnvExport(envs []models.SingleEnvironmentVariable) string {
 	return dotenv
 }
 
-func formatAsYaml(envs []models.SingleEnvironmentVariable) string {
-	var dotenv string
+func formatAsYaml(envs []models.SingleEnvironmentVariable) (string, error) {
+	m := make(map[string]string)
 	for _, env := range envs {
-		dotenv += fmt.Sprintf("%s: %s\n", env.Key, env.Value)
+		m[env.Key] = env.Value
 	}
-	return dotenv
+
+	yamlBytes, err := yaml.Marshal(m)
+	if err != nil {
+		return "", fmt.Errorf("failed to format environment variables as YAML: %w", err)
+	}
+
+	return string(yamlBytes), nil
 }
 
 // Format environment variables as a JSON file

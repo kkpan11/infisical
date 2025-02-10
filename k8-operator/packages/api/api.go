@@ -8,26 +8,6 @@ import (
 
 const USER_AGENT_NAME = "k8-operator"
 
-func CallGetEncryptedWorkspaceKey(httpClient *resty.Client, request GetEncryptedWorkspaceKeyRequest) (GetEncryptedWorkspaceKeyResponse, error) {
-	endpoint := fmt.Sprintf("%v/v2/workspace/%v/encrypted-key", API_HOST_URL, request.WorkspaceId)
-	var result GetEncryptedWorkspaceKeyResponse
-	response, err := httpClient.
-		R().
-		SetResult(&result).
-		SetHeader("User-Agent", USER_AGENT_NAME).
-		Get(endpoint)
-
-	if err != nil {
-		return GetEncryptedWorkspaceKeyResponse{}, fmt.Errorf("CallGetEncryptedWorkspaceKey: Unable to complete api request [err=%s]", err)
-	}
-
-	if response.IsError() {
-		return GetEncryptedWorkspaceKeyResponse{}, fmt.Errorf("CallGetEncryptedWorkspaceKey: Unsuccessful response: [response=%s]", response)
-	}
-
-	return result, nil
-}
-
 func CallGetServiceTokenDetailsV2(httpClient *resty.Client) (GetServiceTokenDetailsResponse, error) {
 	var tokenDetailsResponse GetServiceTokenDetailsResponse
 	response, err := httpClient.
@@ -44,48 +24,7 @@ func CallGetServiceTokenDetailsV2(httpClient *resty.Client) (GetServiceTokenDeta
 		return GetServiceTokenDetailsResponse{}, fmt.Errorf("CallGetServiceTokenDetails: Unsuccessful response: [response=%s]", response)
 	}
 
-	// logging for better debugging and user experience
-	fmt.Printf("Workspace ID: %v\n", tokenDetailsResponse.Workspace)
-	fmt.Printf("TokenName: %v\n", tokenDetailsResponse.Name)
-
 	return tokenDetailsResponse, nil
-}
-
-func CallGetSecretsV3(httpClient *resty.Client, request GetEncryptedSecretsV3Request) (GetEncryptedSecretsV3Response, error) {
-	var secretsResponse GetEncryptedSecretsV3Response
-
-	httpRequest := httpClient.
-		R().
-		SetResult(&secretsResponse).
-		SetHeader("User-Agent", USER_AGENT_NAME).
-		SetHeader("If-None-Match", request.ETag).
-		SetQueryParam("environment", request.Environment).
-		SetQueryParam("include_imports", "true"). // TODO needs to be set as a option
-		SetQueryParam("workspaceId", request.WorkspaceId)
-
-	if request.SecretPath != "" {
-		httpRequest.SetQueryParam("secretPath", request.SecretPath)
-	}
-
-	response, err := httpRequest.Get(fmt.Sprintf("%v/v3/secrets", API_HOST_URL))
-
-	if err != nil {
-		return GetEncryptedSecretsV3Response{}, fmt.Errorf("CallGetSecretsV3: Unable to complete api request [err=%s]", err)
-	}
-
-	if response.IsError() {
-		return GetEncryptedSecretsV3Response{}, fmt.Errorf("CallGetSecretsV3: Unsuccessful response. Please make sure your secret path, workspace and environment name are all correct [response=%s]", response)
-	}
-
-	if response.StatusCode() == 304 {
-		secretsResponse.Modified = false
-	} else {
-		secretsResponse.Modified = true
-	}
-
-	secretsResponse.ETag = response.Header().Get("etag")
-
-	return secretsResponse, nil
 }
 
 func CallGetServiceTokenAccountDetailsV2(httpClient *resty.Client) (ServiceAccountDetailsResponse, error) {
@@ -105,6 +44,48 @@ func CallGetServiceTokenAccountDetailsV2(httpClient *resty.Client) (ServiceAccou
 	}
 
 	return serviceAccountDetailsResponse, nil
+}
+
+func CallUniversalMachineIdentityLogin(request MachineIdentityUniversalAuthLoginRequest) (MachineIdentityDetailsResponse, error) {
+	var machineIdentityDetailsResponse MachineIdentityDetailsResponse
+
+	response, err := resty.New().
+		R().
+		SetResult(&machineIdentityDetailsResponse).
+		SetBody(request).
+		SetHeader("User-Agent", USER_AGENT_NAME).
+		Post(fmt.Sprintf("%v/v1/auth/universal-auth/login", API_HOST_URL))
+
+	if err != nil {
+		return MachineIdentityDetailsResponse{}, fmt.Errorf("CallUniversalMachineIdentityLogin: Unable to complete api request [err=%s]", err)
+	}
+
+	if response.IsError() {
+		return MachineIdentityDetailsResponse{}, fmt.Errorf("CallUniversalMachineIdentityLogin: Unsuccessful response: [response=%s]", response)
+	}
+
+	return machineIdentityDetailsResponse, nil
+}
+
+func CallUniversalMachineIdentityRefreshAccessToken(request MachineIdentityUniversalAuthRefreshRequest) (MachineIdentityDetailsResponse, error) {
+	var universalAuthRefreshResponse MachineIdentityDetailsResponse
+
+	response, err := resty.New().
+		R().
+		SetResult(&universalAuthRefreshResponse).
+		SetHeader("User-Agent", USER_AGENT_NAME).
+		SetBody(request).
+		Post(fmt.Sprintf("%v/v1/auth/token/renew", API_HOST_URL))
+
+	if err != nil {
+		return MachineIdentityDetailsResponse{}, fmt.Errorf("CallUniversalAuthRefreshAccessToken: Unable to complete api request [err=%s]", err)
+	}
+
+	if response.IsError() {
+		return MachineIdentityDetailsResponse{}, fmt.Errorf("CallUniversalAuthRefreshAccessToken: Unsuccessful response [%v %v] [status-code=%v] [response=%v]", response.Request.Method, response.Request.URL, response.StatusCode(), response.String())
+	}
+
+	return universalAuthRefreshResponse, nil
 }
 
 func CallGetServiceAccountWorkspacePermissionsV2(httpClient *resty.Client) (ServiceAccountWorkspacePermissions, error) {
@@ -143,4 +124,25 @@ func CallGetServiceAccountKeysV2(httpClient *resty.Client, request GetServiceAcc
 	}
 
 	return serviceAccountKeysResponse, nil
+}
+
+func CallGetProjectByID(httpClient *resty.Client, request GetProjectByIDRequest) (GetProjectByIDResponse, error) {
+
+	var projectResponse GetProjectByIDResponse
+
+	response, err := httpClient.
+		R().SetResult(&projectResponse).
+		SetHeader("User-Agent", USER_AGENT_NAME).
+		Get(fmt.Sprintf("%s/v1/workspace/%s", API_HOST_URL, request.ProjectID))
+
+	if err != nil {
+		return GetProjectByIDResponse{}, fmt.Errorf("CallGetProject: Unable to complete api request [err=%s]", err)
+	}
+
+	if response.IsError() {
+		return GetProjectByIDResponse{}, fmt.Errorf("CallGetProject: Unsuccessful response: [response=%s]", response)
+	}
+
+	return projectResponse, nil
+
 }

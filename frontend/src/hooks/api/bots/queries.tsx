@@ -12,7 +12,9 @@ export const useGetWorkspaceBot = (workspaceId: string) =>
   useQuery({
     queryKey: queryKeys.getBot(workspaceId),
     queryFn: async () => {
-      const { data: { bot } } = await apiRequest.get<{ bot: TBot }>(`/api/v1/bot/${workspaceId}`);
+      const {
+        data: { bot }
+      } = await apiRequest.get<{ bot: TBot }>(`/api/v1/bot/${workspaceId}`);
       return bot;
     },
     enabled: Boolean(workspaceId)
@@ -21,7 +23,7 @@ export const useGetWorkspaceBot = (workspaceId: string) =>
 export const useUpdateBotActiveStatus = () => {
   const queryClient = useQueryClient();
 
-  return useMutation<{}, {}, TSetBotActiveStatusDto>({
+  return useMutation<object, object, TSetBotActiveStatusDto>({
     mutationFn: ({ botId, isActive, botKey }) => {
       return apiRequest.patch(`/api/v1/bot/${botId}/active`, {
         isActive,
@@ -29,7 +31,7 @@ export const useUpdateBotActiveStatus = () => {
       });
     },
     onSuccess: (_, { workspaceId }) => {
-      queryClient.invalidateQueries(queryKeys.getBot(workspaceId));
+      queryClient.invalidateQueries({ queryKey: queryKeys.getBot(workspaceId) });
     }
   });
 };

@@ -4,10 +4,12 @@ Copyright (c) 2023 Infisical Inc.
 package cmd
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -27,13 +29,14 @@ import (
 	"github.com/fatih/color"
 	"github.com/go-resty/resty/v2"
 	"github.com/manifoldco/promptui"
-	"github.com/pkg/browser"
 	"github.com/posthog/posthog-go"
 	"github.com/rs/cors"
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/cobra"
 	"golang.org/x/crypto/argon2"
 	"golang.org/x/term"
+
+	infisicalSdk "github.com/infisical/go-sdk"
 )
 
 type params struct {
@@ -42,6 +45,101 @@ type params struct {
 	parallelism uint8
 	saltLength  uint32
 	keyLength   uint32
+}
+
+func handleUniversalAuthLogin(cmd *cobra.Command, infisicalClient infisicalSdk.InfisicalClientInterface) (credential infisicalSdk.MachineIdentityCredential, e error) {
+
+	clientId, err := util.GetCmdFlagOrEnv(cmd, "client-id", util.INFISICAL_UNIVERSAL_AUTH_CLIENT_ID_NAME)
+
+	if err != nil {
+		return infisicalSdk.MachineIdentityCredential{}, err
+	}
+
+	clientSecret, err := util.GetCmdFlagOrEnv(cmd, "client-secret", util.INFISICAL_UNIVERSAL_AUTH_CLIENT_SECRET_NAME)
+	if err != nil {
+		return infisicalSdk.MachineIdentityCredential{}, err
+	}
+
+	return infisicalClient.Auth().UniversalAuthLogin(clientId, clientSecret)
+}
+
+func handleKubernetesAuthLogin(cmd *cobra.Command, infisicalClient infisicalSdk.InfisicalClientInterface) (credential infisicalSdk.MachineIdentityCredential, e error) {
+
+	identityId, err := util.GetCmdFlagOrEnv(cmd, "machine-identity-id", util.INFISICAL_MACHINE_IDENTITY_ID_NAME)
+	if err != nil {
+		return infisicalSdk.MachineIdentityCredential{}, err
+	}
+
+	serviceAccountTokenPath, err := util.GetCmdFlagOrEnv(cmd, "service-account-token-path", util.INFISICAL_KUBERNETES_SERVICE_ACCOUNT_TOKEN_NAME)
+	if err != nil {
+		return infisicalSdk.MachineIdentityCredential{}, err
+	}
+
+	return infisicalClient.Auth().KubernetesAuthLogin(identityId, serviceAccountTokenPath)
+}
+
+func handleAzureAuthLogin(cmd *cobra.Command, infisicalClient infisicalSdk.InfisicalClientInterface) (credential infisicalSdk.MachineIdentityCredential, e error) {
+
+	identityId, err := util.GetCmdFlagOrEnv(cmd, "machine-identity-id", util.INFISICAL_MACHINE_IDENTITY_ID_NAME)
+	if err != nil {
+		return infisicalSdk.MachineIdentityCredential{}, err
+	}
+
+	return infisicalClient.Auth().AzureAuthLogin(identityId, "")
+}
+
+func handleGcpIdTokenAuthLogin(cmd *cobra.Command, infisicalClient infisicalSdk.InfisicalClientInterface) (credential infisicalSdk.MachineIdentityCredential, e error) {
+
+	identityId, err := util.GetCmdFlagOrEnv(cmd, "machine-identity-id", util.INFISICAL_MACHINE_IDENTITY_ID_NAME)
+	if err != nil {
+		return infisicalSdk.MachineIdentityCredential{}, err
+	}
+
+	return infisicalClient.Auth().GcpIdTokenAuthLogin(identityId)
+}
+
+func handleGcpIamAuthLogin(cmd *cobra.Command, infisicalClient infisicalSdk.InfisicalClientInterface) (credential infisicalSdk.MachineIdentityCredential, e error) {
+
+	identityId, err := util.GetCmdFlagOrEnv(cmd, "machine-identity-id", util.INFISICAL_MACHINE_IDENTITY_ID_NAME)
+	if err != nil {
+		return infisicalSdk.MachineIdentityCredential{}, err
+	}
+
+	serviceAccountKeyFilePath, err := util.GetCmdFlagOrEnv(cmd, "service-account-key-file-path", util.INFISICAL_GCP_IAM_SERVICE_ACCOUNT_KEY_FILE_PATH_NAME)
+	if err != nil {
+		return infisicalSdk.MachineIdentityCredential{}, err
+	}
+
+	return infisicalClient.Auth().GcpIamAuthLogin(identityId, serviceAccountKeyFilePath)
+}
+
+func handleAwsIamAuthLogin(cmd *cobra.Command, infisicalClient infisicalSdk.InfisicalClientInterface) (credential infisicalSdk.MachineIdentityCredential, e error) {
+
+	identityId, err := util.GetCmdFlagOrEnv(cmd, "machine-identity-id", util.INFISICAL_MACHINE_IDENTITY_ID_NAME)
+	if err != nil {
+		return infisicalSdk.MachineIdentityCredential{}, err
+	}
+
+	return infisicalClient.Auth().AwsIamAuthLogin(identityId)
+}
+
+func handleOidcAuthLogin(cmd *cobra.Command, infisicalClient infisicalSdk.InfisicalClientInterface) (credential infisicalSdk.MachineIdentityCredential, e error) {
+
+	identityId, err := util.GetCmdFlagOrEnv(cmd, "machine-identity-id", util.INFISICAL_MACHINE_IDENTITY_ID_NAME)
+	if err != nil {
+		return infisicalSdk.MachineIdentityCredential{}, err
+	}
+
+	jwt, err := util.GetCmdFlagOrEnv(cmd, "oidc-jwt", util.INFISICAL_OIDC_AUTH_JWT_NAME)
+	if err != nil {
+		return infisicalSdk.MachineIdentityCredential{}, err
+	}
+
+	return infisicalClient.Auth().OidcAuthLogin(identityId, jwt)
+}
+
+func formatAuthMethod(authMethod string) string {
+	return strings.ReplaceAll(authMethod, "-", " ")
 }
 
 const ADD_USER = "Add a new account login"
@@ -55,95 +153,190 @@ var loginCmd = &cobra.Command{
 	Short:                 "Login into your Infisical account",
 	DisableFlagsInUseLine: true,
 	Run: func(cmd *cobra.Command, args []string) {
-		currentLoggedInUserDetails, err := util.GetCurrentLoggedInUserDetails()
-		// if the key can't be found or there is an error getting current credentials from key ring, allow them to override
-		if err != nil && (strings.Contains(err.Error(), "we couldn't find your logged in details")) {
-			log.Debug().Err(err)
-		} else if err != nil {
+
+		presetDomain := config.INFISICAL_URL
+
+		clearSelfHostedDomains, err := cmd.Flags().GetBool("clear-domains")
+		if err != nil {
 			util.HandleError(err)
 		}
 
-		if currentLoggedInUserDetails.IsUserLoggedIn && !currentLoggedInUserDetails.LoginExpired && len(currentLoggedInUserDetails.UserCredentials.PrivateKey) != 0 {
-			shouldOverride, err := userLoginMenu(currentLoggedInUserDetails.UserCredentials.Email)
+		if clearSelfHostedDomains {
+			infisicalConfig, err := util.GetConfigFile()
 			if err != nil {
 				util.HandleError(err)
 			}
 
-			if !shouldOverride {
-				return
-			}
-		}
-		//override domain
-		domainQuery := true
-		if config.INFISICAL_URL_MANUAL_OVERRIDE != "" && config.INFISICAL_URL_MANUAL_OVERRIDE != util.INFISICAL_DEFAULT_API_URL {
-			overrideDomain, err := DomainOverridePrompt()
+			infisicalConfig.Domains = []string{}
+			err = util.WriteConfigFile(&infisicalConfig)
+
 			if err != nil {
 				util.HandleError(err)
 			}
 
-			//if not override set INFISICAL_URL to exported var
-			//set domainQuery to false
-			if !overrideDomain {
-				domainQuery = false
-				config.INFISICAL_URL = config.INFISICAL_URL_MANUAL_OVERRIDE
+			fmt.Println("Cleared all self-hosted domains from the config file")
+			return
+		}
+
+		infisicalClient := infisicalSdk.NewInfisicalClient(context.Background(), infisicalSdk.Config{
+			SiteUrl:          config.INFISICAL_URL,
+			UserAgent:        api.USER_AGENT,
+			AutoTokenRefresh: false,
+		})
+
+		loginMethod, err := cmd.Flags().GetString("method")
+		if err != nil {
+			util.HandleError(err)
+		}
+		plainOutput, err := cmd.Flags().GetBool("plain")
+		if err != nil {
+			util.HandleError(err)
+		}
+
+		authMethodValid, strategy := util.IsAuthMethodValid(loginMethod, true)
+		if !authMethodValid {
+			util.PrintErrorMessageAndExit(fmt.Sprintf("Invalid login method: %s", loginMethod))
+		}
+
+		// standalone user auth
+		if loginMethod == "user" {
+			currentLoggedInUserDetails, err := util.GetCurrentLoggedInUserDetails(true)
+			// if the key can't be found or there is an error getting current credentials from key ring, allow them to override
+			if err != nil && (strings.Contains(err.Error(), "we couldn't find your logged in details")) {
+				log.Debug().Err(err)
+			} else if err != nil {
+				util.HandleError(err)
 			}
 
-		}
+			if currentLoggedInUserDetails.IsUserLoggedIn && !currentLoggedInUserDetails.LoginExpired && len(currentLoggedInUserDetails.UserCredentials.PrivateKey) != 0 {
+				shouldOverride, err := userLoginMenu(currentLoggedInUserDetails.UserCredentials.Email)
+				if err != nil {
+					util.HandleError(err)
+				}
 
-		//prompt user to select domain between Infisical cloud and self hosting
-		if domainQuery {
-			err = askForDomain()
-			if err != nil {
-				util.HandleError(err, "Unable to parse domain url")
+				if !shouldOverride {
+					return
+				}
 			}
-		}
-		var userCredentialsToBeStored models.UserCredentials
 
-		interactiveLogin := false
-		if cmd.Flags().Changed("interactive") {
-			interactiveLogin = true
-			cliDefaultLogin(&userCredentialsToBeStored)
-		}
+			usePresetDomain, err := usePresetDomain(presetDomain)
 
-		//call browser login function
-		if !interactiveLogin {
-			fmt.Println("Logging in via browser... To login via interactive mode run [infisical login -i]")
-			userCredentialsToBeStored, err = browserCliLogin()
 			if err != nil {
-				//default to cli login on error
+				util.HandleError(err)
+			}
+
+			//override domain
+			domainQuery := true
+			if config.INFISICAL_URL_MANUAL_OVERRIDE != "" &&
+				config.INFISICAL_URL_MANUAL_OVERRIDE != fmt.Sprintf("%s/api", util.INFISICAL_DEFAULT_EU_URL) &&
+				config.INFISICAL_URL_MANUAL_OVERRIDE != fmt.Sprintf("%s/api", util.INFISICAL_DEFAULT_US_URL) &&
+				!usePresetDomain {
+				overrideDomain, err := DomainOverridePrompt()
+				if err != nil {
+					util.HandleError(err)
+				}
+
+				//if not override set INFISICAL_URL to exported var
+				//set domainQuery to false
+				if !overrideDomain && !usePresetDomain {
+					domainQuery = false
+					config.INFISICAL_URL = util.AppendAPIEndpoint(config.INFISICAL_URL_MANUAL_OVERRIDE)
+					config.INFISICAL_LOGIN_URL = fmt.Sprintf("%s/login", strings.TrimSuffix(config.INFISICAL_URL, "/api"))
+				}
+
+			}
+
+			//prompt user to select domain between Infisical cloud and self-hosting
+			if domainQuery && !usePresetDomain {
+				err = askForDomain()
+				if err != nil {
+					util.HandleError(err, "Unable to parse domain url")
+				}
+			}
+			var userCredentialsToBeStored models.UserCredentials
+
+			interactiveLogin := false
+			if cmd.Flags().Changed("interactive") {
+				interactiveLogin = true
 				cliDefaultLogin(&userCredentialsToBeStored)
 			}
+
+			//call browser login function
+			if !interactiveLogin {
+				userCredentialsToBeStored, err = browserCliLogin()
+				if err != nil {
+					fmt.Printf("Login via browser failed. %s", err.Error())
+					//default to cli login on error
+					cliDefaultLogin(&userCredentialsToBeStored)
+				}
+			}
+
+			err = util.StoreUserCredsInKeyRing(&userCredentialsToBeStored)
+			if err != nil {
+				log.Error().Msgf("Unable to store your credentials in system vault")
+				log.Error().Msgf("\nTo trouble shoot further, read https://infisical.com/docs/cli/faq")
+				log.Debug().Err(err)
+				//return here
+				util.HandleError(err)
+			}
+
+			err = util.WriteInitalConfig(&userCredentialsToBeStored)
+			if err != nil {
+				util.HandleError(err, "Unable to write write to Infisical Config file. Please try again")
+			}
+
+			// clear backed up secrets from prev account
+			util.DeleteBackupSecrets()
+
+			whilte := color.New(color.FgGreen)
+			boldWhite := whilte.Add(color.Bold)
+			time.Sleep(time.Second * 1)
+			boldWhite.Printf(">>>> Welcome to Infisical!")
+			boldWhite.Printf(" You are now logged in as %v <<<< \n", userCredentialsToBeStored.Email)
+
+			plainBold := color.New(color.Bold)
+
+			plainBold.Println("\nQuick links")
+			fmt.Println("- Learn to inject secrets into your application at https://infisical.com/docs/cli/usage")
+			fmt.Println("- Stuck? Join our slack for quick support https://infisical.com/slack")
+			Telemetry.CaptureEvent("cli-command:login", posthog.NewProperties().Set("infisical-backend", config.INFISICAL_URL).Set("version", util.CLI_VERSION))
+		} else {
+
+			authStrategies := map[util.AuthStrategyType]func(cmd *cobra.Command, infisicalClient infisicalSdk.InfisicalClientInterface) (credential infisicalSdk.MachineIdentityCredential, e error){
+				util.AuthStrategy.UNIVERSAL_AUTH:    handleUniversalAuthLogin,
+				util.AuthStrategy.KUBERNETES_AUTH:   handleKubernetesAuthLogin,
+				util.AuthStrategy.AZURE_AUTH:        handleAzureAuthLogin,
+				util.AuthStrategy.GCP_ID_TOKEN_AUTH: handleGcpIdTokenAuthLogin,
+				util.AuthStrategy.GCP_IAM_AUTH:      handleGcpIamAuthLogin,
+				util.AuthStrategy.AWS_IAM_AUTH:      handleAwsIamAuthLogin,
+				util.AuthStrategy.OIDC_AUTH:         handleOidcAuthLogin,
+			}
+
+			credential, err := authStrategies[strategy](cmd, infisicalClient)
+
+			if err != nil {
+				euErrorMessage := ""
+				if strings.HasPrefix(config.INFISICAL_URL, util.INFISICAL_DEFAULT_US_URL) {
+					euErrorMessage = fmt.Sprintf("\nIf you are using the Infisical Cloud Europe Region, please switch to it by using the \"--domain %s\" flag.", util.INFISICAL_DEFAULT_EU_URL)
+				}
+				util.HandleError(fmt.Errorf("unable to authenticate with %s [err=%v].%s", formatAuthMethod(loginMethod), err, euErrorMessage))
+			}
+
+			if plainOutput {
+				fmt.Println(credential.AccessToken)
+				return
+			}
+
+			boldGreen := color.New(color.FgGreen).Add(color.Bold)
+			boldPlain := color.New(color.Bold)
+			time.Sleep(time.Second * 1)
+			boldGreen.Printf(">>>> Successfully authenticated with %s!\n\n", formatAuthMethod(loginMethod))
+			boldPlain.Printf("Access Token:\n%v", credential.AccessToken)
+
+			plainBold := color.New(color.Bold)
+			plainBold.Println("\n\nYou can use this access token to authenticate through other commands in the CLI.")
+
 		}
-
-		err = util.StoreUserCredsInKeyRing(&userCredentialsToBeStored)
-		if err != nil {
-			log.Error().Msgf("Unable to store your credentials in system vault [%s]")
-			log.Error().Msgf("\nTo trouble shoot further, read https://infisical.com/docs/cli/faq")
-			log.Debug().Err(err)
-			//return here
-			util.HandleError(err)
-		}
-
-		err = util.WriteInitalConfig(&userCredentialsToBeStored)
-		if err != nil {
-			util.HandleError(err, "Unable to write write to Infisical Config file. Please try again")
-		}
-
-		// clear backed up secrets from prev account
-		util.DeleteBackupSecrets()
-
-		whilte := color.New(color.FgGreen)
-		boldWhite := whilte.Add(color.Bold)
-		time.Sleep(time.Second * 1)
-		boldWhite.Printf(">>>> Welcome to Infisical!")
-		boldWhite.Printf(" You are now logged in as %v <<<< \n", userCredentialsToBeStored.Email)
-
-		plainBold := color.New(color.Bold)
-
-		plainBold.Println("\nQuick links")
-		fmt.Println("- Learn to inject secrets into your application at https://infisical.com/docs/cli/usage")
-		fmt.Println("- Stuck? Join our slack for quick support https://infisical.com/slack")
-		Telemetry.CaptureEvent("cli-command:login", posthog.NewProperties().Set("infisical-backend", config.INFISICAL_URL).Set("version", util.CLI_VERSION))
 	},
 }
 
@@ -164,7 +357,7 @@ func cliDefaultLogin(userCredentialsToBeStored *models.UserCredentials) {
 	if loginTwoResponse.MfaEnabled {
 		i := 1
 		for i < 6 {
-			mfaVerifyCode := askForMFACode()
+			mfaVerifyCode := askForMFACode("email")
 
 			httpClient := resty.New()
 			httpClient.SetAuthToken(loginTwoResponse.Token)
@@ -301,16 +494,27 @@ func cliDefaultLogin(userCredentialsToBeStored *models.UserCredentials) {
 		log.Debug().Msgf("[decryptedPrivateKey=%s] [email=%s] [loginTwoResponse.Token=%s]", string(decryptedPrivateKey), email, loginTwoResponse.Token)
 		util.PrintErrorMessageAndExit("We were unable to fetch required details to complete your login. Run with -d to see more info")
 	}
+	// Login is successful so ask user to choose organization
+	newJwtToken := GetJwtTokenWithOrganizationId(loginTwoResponse.Token, email)
 
 	//updating usercredentials
 	userCredentialsToBeStored.Email = email
 	userCredentialsToBeStored.PrivateKey = string(decryptedPrivateKey)
-	userCredentialsToBeStored.JTWToken = loginTwoResponse.Token
+	userCredentialsToBeStored.JTWToken = newJwtToken
 }
 
 func init() {
 	rootCmd.AddCommand(loginCmd)
+	loginCmd.Flags().Bool("clear-domains", false, "clear all self-hosting domains from the config file")
 	loginCmd.Flags().BoolP("interactive", "i", false, "login via the command line")
+	loginCmd.Flags().String("method", "user", "login method [user, universal-auth]")
+	loginCmd.Flags().Bool("plain", false, "only output the token without any formatting")
+	loginCmd.Flags().String("client-id", "", "client id for universal auth")
+	loginCmd.Flags().String("client-secret", "", "client secret for universal auth")
+	loginCmd.Flags().String("machine-identity-id", "", "machine identity id for kubernetes, azure, gcp-id-token, gcp-iam, and aws-iam auth methods")
+	loginCmd.Flags().String("service-account-token-path", "", "service account token path for kubernetes auth")
+	loginCmd.Flags().String("service-account-key-file-path", "", "service account key file path for GCP IAM auth")
+	loginCmd.Flags().String("oidc-jwt", "", "JWT for OIDC authentication")
 }
 
 func DomainOverridePrompt() (bool, error) {
@@ -336,18 +540,60 @@ func DomainOverridePrompt() (bool, error) {
 	return selectedOption == OVERRIDE, err
 }
 
+func usePresetDomain(presetDomain string) (bool, error) {
+	infisicalConfig, err := util.GetConfigFile()
+	if err != nil {
+		return false, fmt.Errorf("askForDomain: unable to get config file because [err=%s]", err)
+	}
+
+	preconfiguredUrl := strings.TrimSuffix(presetDomain, "/api")
+
+	if preconfiguredUrl != "" && preconfiguredUrl != util.INFISICAL_DEFAULT_US_URL && preconfiguredUrl != util.INFISICAL_DEFAULT_EU_URL {
+		parsedDomain := strings.TrimSuffix(strings.Trim(preconfiguredUrl, "/"), "/api")
+
+		_, err := url.ParseRequestURI(parsedDomain)
+		if err != nil {
+			return false, errors.New(fmt.Sprintf("Invalid domain URL: '%s'", parsedDomain))
+		}
+
+		config.INFISICAL_URL = fmt.Sprintf("%s/api", parsedDomain)
+		config.INFISICAL_LOGIN_URL = fmt.Sprintf("%s/login", parsedDomain)
+
+		if !slices.Contains(infisicalConfig.Domains, parsedDomain) {
+			infisicalConfig.Domains = append(infisicalConfig.Domains, parsedDomain)
+			err = util.WriteConfigFile(&infisicalConfig)
+
+			if err != nil {
+				return false, fmt.Errorf("askForDomain: unable to write domains to config file because [err=%s]", err)
+			}
+		}
+
+		whilte := color.New(color.FgGreen)
+		boldWhite := whilte.Add(color.Bold)
+		time.Sleep(time.Second * 1)
+		boldWhite.Printf("[INFO] Using domain '%s' from domain flag or INFISICAL_API_URL environment variable\n", parsedDomain)
+
+		return true, nil
+	}
+
+	return false, nil
+}
+
 func askForDomain() error {
-	//query user to choose between Infisical cloud or self hosting
+
+	// query user to choose between Infisical cloud or self-hosting
 	const (
-		INFISICAL_CLOUD = "Infisical Cloud"
-		SELF_HOSTING    = "Self Hosting"
+		INFISICAL_CLOUD_US = "Infisical Cloud (US Region)"
+		INFISICAL_CLOUD_EU = "Infisical Cloud (EU Region)"
+		SELF_HOSTING       = "Self-Hosting or Dedicated Instance"
+		ADD_NEW_DOMAIN     = "Add a new domain"
 	)
 
-	options := []string{INFISICAL_CLOUD, SELF_HOSTING}
+	options := []string{INFISICAL_CLOUD_US, INFISICAL_CLOUD_EU, SELF_HOSTING}
 	optionsPrompt := promptui.Select{
 		Label: "Select your hosting option",
 		Items: options,
-		Size:  2,
+		Size:  3,
 	}
 
 	_, selectedHostingOption, err := optionsPrompt.Run()
@@ -355,11 +601,46 @@ func askForDomain() error {
 		return err
 	}
 
-	if selectedHostingOption == INFISICAL_CLOUD {
-		//cloud option
-		config.INFISICAL_URL = fmt.Sprintf("%s/api", util.INFISICAL_DEFAULT_URL)
-		config.INFISICAL_LOGIN_URL = fmt.Sprintf("%s/login", util.INFISICAL_DEFAULT_URL)
+	if selectedHostingOption == INFISICAL_CLOUD_US {
+		// US cloud option
+		config.INFISICAL_URL = fmt.Sprintf("%s/api", util.INFISICAL_DEFAULT_US_URL)
+		config.INFISICAL_LOGIN_URL = fmt.Sprintf("%s/login", util.INFISICAL_DEFAULT_US_URL)
 		return nil
+	} else if selectedHostingOption == INFISICAL_CLOUD_EU {
+		// EU cloud option
+		config.INFISICAL_URL = fmt.Sprintf("%s/api", util.INFISICAL_DEFAULT_EU_URL)
+		config.INFISICAL_LOGIN_URL = fmt.Sprintf("%s/login", util.INFISICAL_DEFAULT_EU_URL)
+		return nil
+	}
+
+	infisicalConfig, err := util.GetConfigFile()
+	if err != nil {
+		return fmt.Errorf("askForDomain: unable to get config file because [err=%s]", err)
+	}
+
+	if infisicalConfig.Domains != nil && len(infisicalConfig.Domains) > 0 {
+		// If domains are present in the config, let the user select from the list or select to add a new domain
+
+		items := append(infisicalConfig.Domains, ADD_NEW_DOMAIN)
+
+		prompt := promptui.Select{
+			Label: "Which domain would you like to use?",
+			Items: items,
+			Size:  5,
+		}
+
+		_, selectedOption, err := prompt.Run()
+		if err != nil {
+			return err
+		}
+
+		if selectedOption != ADD_NEW_DOMAIN {
+			config.INFISICAL_URL = fmt.Sprintf("%s/api", selectedOption)
+			config.INFISICAL_LOGIN_URL = fmt.Sprintf("%s/login", selectedOption)
+			return nil
+
+		}
+
 	}
 
 	urlValidation := func(input string) error {
@@ -380,12 +661,23 @@ func askForDomain() error {
 	if err != nil {
 		return err
 	}
-	//trimmed the '/' from the end of the self hosting url
+
+	// Trimmed the '/' from the end of the self-hosting url, and set the api & login url
 	domain = strings.TrimRight(domain, "/")
-	//set api and login url
 	config.INFISICAL_URL = fmt.Sprintf("%s/api", domain)
 	config.INFISICAL_LOGIN_URL = fmt.Sprintf("%s/login", domain)
-	//return nil
+
+	// Write the new domain to the config file, to allow the user to select it in the future if needed
+	// First check if infiscialConfig.Domains already includes the domain, if it does, do not add it again
+	if !slices.Contains(infisicalConfig.Domains, domain) {
+		infisicalConfig.Domains = append(infisicalConfig.Domains, domain)
+		err = util.WriteConfigFile(&infisicalConfig)
+
+		if err != nil {
+			return fmt.Errorf("askForDomain: unable to write domains to config file because [err=%s]", err)
+		}
+	}
+
 	return nil
 }
 
@@ -471,6 +763,7 @@ func getFreshUserCredentials(email string, password string) (*api.GetLoginOneV2R
 	loginTwoResponseResult, err := api.CallLogin2V2(httpClient, api.GetLoginTwoV2Request{
 		Email:       email,
 		ClientProof: hex.EncodeToString(srpM1),
+		Password:    password,
 	})
 
 	if err != nil {
@@ -478,6 +771,85 @@ func getFreshUserCredentials(email string, password string) (*api.GetLoginOneV2R
 	}
 
 	return &loginOneResponseResult, &loginTwoResponseResult, nil
+}
+
+func GetJwtTokenWithOrganizationId(oldJwtToken string, email string) string {
+	log.Debug().Msg(fmt.Sprint("GetJwtTokenWithOrganizationId: ", "oldJwtToken", oldJwtToken))
+
+	httpClient := resty.New()
+	httpClient.SetAuthToken(oldJwtToken)
+
+	organizationResponse, err := api.CallGetAllOrganizations(httpClient)
+
+	if err != nil {
+		util.HandleError(err, "Unable to pull organizations that belong to you")
+	}
+
+	organizations := organizationResponse.Organizations
+
+	organizationNames := util.GetOrganizationsNameList(organizationResponse)
+
+	prompt := promptui.Select{
+		Label: "Which Infisical organization would you like to log into?",
+		Items: organizationNames,
+	}
+
+	index, _, err := prompt.Run()
+	if err != nil {
+		util.HandleError(err)
+	}
+
+	selectedOrganization := organizations[index]
+
+	selectedOrgRes, err := api.CallSelectOrganization(httpClient, api.SelectOrganizationRequest{OrganizationId: selectedOrganization.ID})
+	if err != nil {
+		util.HandleError(err)
+	}
+
+	if selectedOrgRes.MfaEnabled {
+		i := 1
+		for i < 6 {
+			mfaVerifyCode := askForMFACode(selectedOrgRes.MfaMethod)
+
+			httpClient := resty.New()
+			httpClient.SetAuthToken(selectedOrgRes.Token)
+			verifyMFAresponse, mfaErrorResponse, requestError := api.CallVerifyMfaToken(httpClient, api.VerifyMfaTokenRequest{
+				Email:     email,
+				MFAToken:  mfaVerifyCode,
+				MFAMethod: selectedOrgRes.MfaMethod,
+			})
+			if requestError != nil {
+				util.HandleError(err)
+				break
+			} else if mfaErrorResponse != nil {
+				if mfaErrorResponse.Context.Code == "mfa_invalid" {
+					msg := fmt.Sprintf("Incorrect, verification code. You have %v attempts left", 5-i)
+					fmt.Println(msg)
+					if i == 5 {
+						util.PrintErrorMessageAndExit("No tries left, please try again in a bit")
+						break
+					}
+				}
+
+				if mfaErrorResponse.Context.Code == "mfa_expired" {
+					util.PrintErrorMessageAndExit("Your 2FA verification code has expired, please try logging in again")
+					break
+				}
+				i++
+			} else {
+				httpClient.SetAuthToken(verifyMFAresponse.Token)
+				selectedOrgRes, err = api.CallSelectOrganization(httpClient, api.SelectOrganizationRequest{OrganizationId: selectedOrganization.ID})
+				break
+			}
+		}
+	}
+
+	if err != nil {
+		util.HandleError(err, "Unable to select organization")
+	}
+
+	return selectedOrgRes.Token
+
 }
 
 func userLoginMenu(currentLoggedInUserEmail string) (bool, error) {
@@ -499,9 +871,15 @@ func generateFromPassword(password string, salt []byte, p *params) (hash []byte,
 	return hash, nil
 }
 
-func askForMFACode() string {
+func askForMFACode(mfaMethod string) string {
+	var label string
+	if mfaMethod == "totp" {
+		label = "Enter the verification code from your mobile authenticator app or use a recovery code"
+	} else {
+		label = "Enter the 2FA verification code sent to your email"
+	}
 	mfaCodePromptUI := promptui.Prompt{
-		Label: "Enter the 2FA verification code sent to your email",
+		Label: label,
 	}
 
 	mfaVerifyCode, err := mfaCodePromptUI.Run()
@@ -512,10 +890,62 @@ func askForMFACode() string {
 	return mfaVerifyCode
 }
 
+func askToPasteJwtToken(success chan models.UserCredentials, failure chan error) {
+	time.Sleep(time.Second * 5)
+	fmt.Println("\n\nOnce login is completed via browser, the CLI should be authenticated automatically.")
+	fmt.Println("However, if browser fails to communicate with the CLI, please paste the token from the browser below.")
+
+	fmt.Print("\n\nToken: ")
+	bytePassword, err := term.ReadPassword(int(os.Stdin.Fd()))
+	if err != nil {
+		failure <- err
+		fmt.Println("\nError reading input:", err)
+		os.Exit(1)
+	}
+
+	infisicalPastedToken := strings.TrimSpace(string(bytePassword))
+
+	userCredentials, err := decodePastedBase64Token(infisicalPastedToken)
+	if err != nil {
+		failure <- err
+		fmt.Println("Invalid user credentials provided", err)
+		os.Exit(1)
+	}
+
+	// verify JTW
+	httpClient := resty.New().
+		SetAuthToken(userCredentials.JTWToken).
+		SetHeader("Accept", "application/json")
+
+	isAuthenticated := api.CallIsAuthenticated(httpClient)
+	if !isAuthenticated {
+		fmt.Println("Invalid user credentials provided", err)
+		failure <- err
+		os.Exit(1)
+	}
+
+	success <- *userCredentials
+}
+
+func decodePastedBase64Token(token string) (*models.UserCredentials, error) {
+	data, err := base64.StdEncoding.DecodeString(token)
+	if err != nil {
+		return nil, err
+	}
+	var loginResponse models.UserCredentials
+
+	err = json.Unmarshal(data, &loginResponse)
+	if err != nil {
+		return nil, err
+	}
+
+	return &loginResponse, nil
+}
+
 // Manages the browser login flow.
 // Returns a UserCredentials object on success and an error on failure
 func browserCliLogin() (models.UserCredentials, error) {
-	SERVER_TIMEOUT := 60 * 10
+	SERVER_TIMEOUT := 10 * 60
 
 	//create listener
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
@@ -527,17 +957,12 @@ func browserCliLogin() (models.UserCredentials, error) {
 	callbackPort := listener.Addr().(*net.TCPAddr).Port
 	url := fmt.Sprintf("%s?callback_port=%d", config.INFISICAL_LOGIN_URL, callbackPort)
 
-	//open browser and login
-	err = browser.OpenURL(url)
-	if err != nil {
-		return models.UserCredentials{}, err
-	}
+	fmt.Printf("\n\nTo complete your login, open this address in your browser: %v \n", url)
 
 	//flow channels
 	success := make(chan models.UserCredentials)
 	failure := make(chan error)
 	timeout := time.After(time.Second * time.Duration(SERVER_TIMEOUT))
-	quit := make(chan bool)
 
 	//terminal state
 	oldState, err := term.GetState(int(os.Stdin.Fd()))
@@ -560,23 +985,22 @@ func browserCliLogin() (models.UserCredentials, error) {
 	log.Debug().Msgf("Callback server listening on port %d", callbackPort)
 
 	go http.Serve(listener, corsHandler)
+	go askToPasteJwtToken(success, failure)
 
 	for {
 		select {
 		case loginResponse := <-success:
 			_ = closeListener(&listener)
+			fmt.Println("Browser login successful")
 			return loginResponse, nil
 
-		case <-failure:
-			err = closeListener(&listener)
-			return models.UserCredentials{}, err
+		case err := <-failure:
+			serverErr := closeListener(&listener)
+			return models.UserCredentials{}, errors.Join(err, serverErr)
 
 		case <-timeout:
 			_ = closeListener(&listener)
 			return models.UserCredentials{}, errors.New("server timeout")
-
-		case <-quit:
-			return models.UserCredentials{}, errors.New("quitting browser login, defaulting to cli...")
 		}
 	}
 }

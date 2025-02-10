@@ -1,11 +1,17 @@
-import type { UserWsKeyPair } from "../keys/types";
+import { ProjectPermissionActions } from "@app/context";
+
 import type { WsTag } from "../tags/types";
+
+export enum SecretType {
+  Shared = "shared",
+  Personal = "personal"
+}
 
 export type EncryptedSecret = {
   id: string;
   version: number;
   workspace: string;
-  type: "shared" | "personal";
+  type: SecretType;
   environment: string;
   secretKeyCiphertext: string;
   secretKeyIV: string;
@@ -25,39 +31,70 @@ export type EncryptedSecret = {
   tags: WsTag[];
 };
 
-export type DecryptedSecret = {
+// both personal and shared secret stitched together for dashboard
+export type SecretV3RawSanitized = {
   id: string;
   version: number;
   key: string;
-  value: string;
-  comment: string;
+  value?: string;
+  comment?: string;
   reminderRepeatDays?: number | null;
   reminderNote?: string | null;
-  tags: WsTag[];
+  tags?: WsTag[];
   createdAt: string;
   updatedAt: string;
   env: string;
+  path?: string;
   valueOverride?: string;
   idOverride?: string;
   overrideAction?: string;
   folderId?: string;
   skipMultilineEncoding?: boolean;
+  secretMetadata?: { key: string; value: string }[];
 };
 
-export type EncryptedSecretVersion = {
+export type SecretV3Raw = {
+  id: string;
+  _id: string;
+  workspace: string;
+  environment: string;
+  version: number;
+  type: string;
+  secretKey: string;
+  secretPath: string;
+  secretValue?: string;
+  secretComment?: string;
+  secretReminderNote?: string;
+  secretReminderRepeatDays?: number;
+  secretMetadata?: { key: string; value: string }[];
+  skipMultilineEncoding?: boolean;
+  metadata?: Record<string, string>;
+  tags?: WsTag[];
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type SecretV3RawResponse = {
+  secrets: SecretV3Raw[];
+  imports: {
+    secretPath: string;
+    environment: string;
+    folderId: string;
+    secrets: SecretV3Raw[];
+  }[];
+};
+
+export type SecretVersions = {
   id: string;
   secretId: string;
   version: number;
   workspace: string;
-  type: string;
+  type: SecretType;
   isDeleted: boolean;
   envId: string;
-  secretKeyCiphertext: string;
-  secretKeyIV: string;
-  secretKeyTag: string;
-  secretValueCiphertext: string;
-  secretValueIV: string;
-  secretValueTag: string;
+  secretKey: string;
+  secretValue?: string;
+  secretComment?: string;
   tags: WsTag[];
   __v: number;
   skipMultilineEncoding?: boolean;
@@ -70,16 +107,15 @@ export type TGetProjectSecretsKey = {
   workspaceId: string;
   environment: string;
   secretPath?: string;
+  includeImports?: boolean;
+  expandSecretReferences?: boolean;
 };
 
-export type TGetProjectSecretsDTO = {
-  decryptFileKey: UserWsKeyPair;
-} & TGetProjectSecretsKey;
+export type TGetProjectSecretsDTO = TGetProjectSecretsKey;
 
 export type TGetProjectSecretsAllEnvDTO = {
   workspaceId: string;
   envs: string[];
-  decryptFileKey: UserWsKeyPair;
   folderId?: string;
   secretPath?: string;
   isPaused?: boolean;
@@ -89,44 +125,49 @@ export type GetSecretVersionsDTO = {
   secretId: string;
   limit: number;
   offset: number;
-  decryptFileKey: UserWsKeyPair;
+};
+
+export type TGetSecretAccessListDTO = {
+  workspaceId: string;
+  environment: string;
+  secretPath: string;
+  secretKey: string;
 };
 
 export type TCreateSecretsV3DTO = {
-  latestFileKey: UserWsKeyPair;
-  secretName: string;
+  secretKey: string;
   secretValue: string;
   secretComment: string;
   skipMultilineEncoding?: boolean;
   secretPath: string;
   workspaceId: string;
   environment: string;
-  type: string;
+  type: SecretType;
+  tagIds?: string[];
 };
 
 export type TUpdateSecretsV3DTO = {
-  latestFileKey: UserWsKeyPair;
   workspaceId: string;
   environment: string;
-  type: string;
   secretPath: string;
+  type: SecretType;
   skipMultilineEncoding?: boolean;
   newSecretName?: string;
-  secretName: string;
-  secretId?: string;
+  secretKey: string;
   secretValue: string;
   secretComment?: string;
   secretReminderRepeatDays?: number | null;
   secretReminderNote?: string | null;
-  tags?: string[];
+  tagIds?: string[];
+  secretMetadata?: { key: string; value: string }[];
 };
 
 export type TDeleteSecretsV3DTO = {
   workspaceId: string;
   environment: string;
-  type: "shared" | "personal";
+  type: SecretType;
   secretPath: string;
-  secretName: string;
+  secretKey: string;
   secretId?: string;
 };
 
@@ -134,13 +175,13 @@ export type TCreateSecretBatchDTO = {
   workspaceId: string;
   environment: string;
   secretPath: string;
-  latestFileKey: UserWsKeyPair;
   secrets: Array<{
-    secretName: string;
+    secretKey: string;
     secretValue: string;
     secretComment: string;
     skipMultilineEncoding?: boolean;
-    type: "shared" | "personal";
+    type: SecretType;
+    tagIds?: string[];
     metadata?: {
       source?: string;
     };
@@ -151,14 +192,16 @@ export type TUpdateSecretBatchDTO = {
   workspaceId: string;
   environment: string;
   secretPath: string;
-  latestFileKey: UserWsKeyPair;
   secrets: Array<{
-    type: "shared" | "personal";
-    secretName: string;
-    skipMultilineEncoding?: boolean;
+    type: SecretType;
+    secretKey: string;
     secretValue: string;
-    secretComment: string;
-    tags?: string[];
+    secretComment?: string;
+    skipMultilineEncoding?: boolean;
+    tagIds?: string[];
+    metadata?: {
+      source?: string;
+    };
   }>;
 };
 
@@ -167,27 +210,40 @@ export type TDeleteSecretBatchDTO = {
   environment: string;
   secretPath: string;
   secrets: Array<{
-    secretName: string;
-    type: "shared" | "personal";
+    secretKey: string;
+    type: SecretType;
   }>;
 };
 
-export type CreateSecretDTO = {
-  workspaceId: string;
-  environment: string;
-  type: "shared" | "personal";
+export type TMoveSecretsDTO = {
+  projectSlug: string;
+  projectId: string;
+  sourceEnvironment: string;
+  sourceSecretPath: string;
+  destinationEnvironment: string;
+  destinationSecretPath: string;
+  secretIds: string[];
+  shouldOverwrite: boolean;
+};
+
+export type TGetSecretReferenceTreeDTO = {
   secretKey: string;
-  secretKeyCiphertext: string;
-  secretKeyIV: string;
-  secretKeyTag: string;
-  secretValueCiphertext: string;
-  secretValueIV: string;
-  secretValueTag: string;
-  secretCommentCiphertext: string;
-  secretCommentIV: string;
-  secretCommentTag: string;
   secretPath: string;
-  metadata?: {
-    source?: string;
-  };
+  environmentSlug: string;
+  projectId: string;
+};
+
+export type TSecretReferenceTraceNode = {
+  key: string;
+  value?: string;
+  environment: string;
+  secretPath: string;
+  children: TSecretReferenceTraceNode[];
+};
+
+export type SecretAccessListEntry = {
+  allowedActions: ProjectPermissionActions[];
+  id: string;
+  membershipId: string;
+  name: string;
 };

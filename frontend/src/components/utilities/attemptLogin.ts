@@ -1,8 +1,8 @@
 /* eslint-disable prefer-destructuring */
 import jsrp from "jsrp";
 
+import { decryptPrivateKeyHelper } from "@app/helpers/key";
 import { login1, login2 } from "@app/hooks/api/auth/queries";
-import KeyService from "@app/services/KeyService";
 
 import Telemetry from "./telemetry/Telemetry";
 import { saveTokenToLocalStorage } from "./saveTokenToLocalStorage";
@@ -22,11 +22,13 @@ interface IsLoginSuccessful {
 const attemptLogin = async ({
   email,
   password,
-  providerAuthToken
+  providerAuthToken,
+  captchaToken
 }: {
   email: string;
   password: string;
   providerAuthToken?: string;
+  captchaToken?: string;
 }): Promise<IsLoginSuccessful> => {
   const telemetry = new Telemetry().getInstance();
   // eslint-disable-next-line new-cap
@@ -58,7 +60,9 @@ const attemptLogin = async ({
     iv,
     tag
   } = await login2({
+    captchaToken,
     email,
+    password,
     clientProof,
     providerAuthToken
   });
@@ -82,7 +86,7 @@ const attemptLogin = async ({
     // set JWT token
     SecurityClient.setToken(token);
 
-    const privateKey = await KeyService.decryptPrivateKey({
+    const privateKey = await decryptPrivateKeyHelper({
       encryptionVersion,
       encryptedPrivateKey,
       iv,

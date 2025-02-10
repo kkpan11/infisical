@@ -1,20 +1,28 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { apiRequest } from "@app/config/request";
+import { TReactQueryOptions } from "@app/types/reactQuery";
 
-import { workspaceKeys } from "../workspace/queries";
+import { workspaceKeys } from "../workspace";
 import {
   App,
+  BitBucketEnvironment,
   BitBucketWorkspace,
   ChecklyGroup,
+  CircleCIOrganization,
   Environment,
+  HerokuPipelineCoupling,
   IntegrationAuth,
+  KmsKey,
   NorthflankSecretGroup,
   Org,
   Project,
   Service,
   Team,
-  TeamCityBuildConfig
+  TeamCityBuildConfig,
+  TGetIntegrationAuthOctopusDeployScopeValuesDTO,
+  TOctopusDeployVariableSetScopeValues,
+  VercelEnvironment
 } from "./types";
 
 const integrationAuthKeys = {
@@ -38,6 +46,17 @@ const integrationAuthKeys = {
     integrationAuthId: string;
     accountId: string;
   }) => [{ integrationAuthId, accountId }, "integrationAuthChecklyGroups"] as const,
+  getIntegrationAuthGithubOrgs: (integrationAuthId: string) =>
+    [{ integrationAuthId }, "integrationAuthGithubOrgs"] as const,
+  getIntegrationAuthGithubEnvs: (integrationAuthId: string, repoName: string, repoOwner: string) =>
+    [{ integrationAuthId, repoName, repoOwner }, "integrationAuthGithubOrgs"] as const,
+  getIntegrationAuthAwsKmsKeys: ({
+    integrationAuthId,
+    region
+  }: {
+    integrationAuthId: string;
+    region: string;
+  }) => [{ integrationAuthId, region }, "integrationAuthAwsKmsKeyIds"] as const,
   getIntegrationAuthQoveryOrgs: (integrationAuthId: string) =>
     [{ integrationAuthId }, "integrationAuthQoveryOrgs"] as const,
   getIntegrationAuthQoveryProjects: ({
@@ -63,6 +82,8 @@ const integrationAuthKeys = {
     environmentId: string;
     scope: "job" | "application" | "container";
   }) => [{ integrationAuthId, environmentId, scope }, "integrationAuthQoveryScopes"] as const,
+  getIntegrationAuthHerokuPipelines: ({ integrationAuthId }: { integrationAuthId: string }) =>
+    [{ integrationAuthId }, "integrationAuthHerokuPipelines"] as const,
   getIntegrationAuthRailwayEnvironments: ({
     integrationAuthId,
     appId
@@ -79,6 +100,17 @@ const integrationAuthKeys = {
   }) => [{ integrationAuthId, appId }, "integrationAuthRailwayServices"] as const,
   getIntegrationAuthBitBucketWorkspaces: (integrationAuthId: string) =>
     [{ integrationAuthId }, "integrationAuthBitbucketWorkspaces"] as const,
+  getIntegrationAuthBitBucketEnvironments: (
+    integrationAuthId: string,
+    workspaceSlug: string,
+    repoSlug: string
+  ) =>
+    [
+      { integrationAuthId },
+      workspaceSlug,
+      repoSlug,
+      "integrationAuthBitbucketEnvironments"
+    ] as const,
   getIntegrationAuthNorthflankSecretGroups: ({
     integrationAuthId,
     appId
@@ -92,7 +124,18 @@ const integrationAuthKeys = {
   }: {
     integrationAuthId: string;
     appId: string;
-  }) => [{ integrationAuthId, appId }, "integrationAuthTeamCityBranchConfigs"] as const
+  }) => [{ integrationAuthId, appId }, "integrationAuthTeamCityBranchConfigs"] as const,
+  getIntegrationAuthOctopusDeploySpaces: (integrationAuthId: string) =>
+    [{ integrationAuthId }, "getIntegrationAuthOctopusDeploySpaces"] as const,
+  getIntegrationAuthOctopusDeployScopeValues: ({
+    integrationAuthId,
+    ...params
+  }: TGetIntegrationAuthOctopusDeployScopeValuesDTO) =>
+    [{ integrationAuthId }, "getIntegrationAuthOctopusDeployScopeValues", params] as const,
+  getIntegrationAuthCircleCIOrganizations: (integrationAuthId: string) =>
+    [{ integrationAuthId }, "getIntegrationAuthCircleCIOrganizations"] as const,
+  getIntegrationAuthVercelCustomEnv: (integrationAuthId: string, teamId: string) =>
+    [{ integrationAuthId, teamId }, "integrationAuthVercelCustomEnv"] as const
 };
 
 const fetchIntegrationAuthById = async (integrationAuthId: string) => {
@@ -105,16 +148,22 @@ const fetchIntegrationAuthById = async (integrationAuthId: string) => {
 const fetchIntegrationAuthApps = async ({
   integrationAuthId,
   teamId,
+  azureDevOpsOrgName,
   workspaceSlug
 }: {
   integrationAuthId: string;
   teamId?: string;
+  azureDevOpsOrgName?: string;
   workspaceSlug?: string;
 }) => {
   const params: Record<string, string> = {};
   if (teamId) {
     params.teamId = teamId;
   }
+  if (azureDevOpsOrgName) {
+    params.azureDevOpsOrgName = azureDevOpsOrgName;
+  }
+
   if (workspaceSlug) {
     params.workspaceSlug = workspaceSlug;
   }
@@ -124,7 +173,8 @@ const fetchIntegrationAuthApps = async ({
     `/api/v1/integration-auth/${integrationAuthId}/apps`,
     { params: searchParams }
   );
-  return data.apps;
+
+  return data.apps.sort((a, b) => a.name.localeCompare(b.name));
 };
 
 const fetchIntegrationAuthTeams = async (integrationAuthId: string) => {
@@ -172,6 +222,32 @@ const fetchIntegrationAuthVercelBranches = async ({
   );
 
   return branches;
+};
+
+const fetchIntegrationAuthGithubOrgs = async (integrationAuthId: string) => {
+  const {
+    data: { orgs }
+  } = await apiRequest.get<{ orgs: Org[] }>(
+    `/api/v1/integration-auth/${integrationAuthId}/github/orgs`
+  );
+
+  return orgs;
+};
+
+const fetchIntegrationAuthGithubEnvs = async (
+  integrationAuthId: string,
+  repoName: string,
+  repoOwner: string
+) => {
+  if (!repoName || !repoOwner) return [];
+
+  const {
+    data: { envs }
+  } = await apiRequest.get<{ envs: Array<{ name: string; envId: string }> }>(
+    `/api/v1/integration-auth/${integrationAuthId}/github/envs?repoName=${repoName}&repoOwner=${repoOwner}`
+  );
+
+  return envs;
 };
 
 const fetchIntegrationAuthQoveryOrgs = async (integrationAuthId: string) => {
@@ -289,6 +365,43 @@ const fetchIntegrationAuthQoveryScopes = async ({
   return undefined;
 };
 
+const fetchIntegrationAuthVercelCustomEnvironments = async ({
+  integrationAuthId,
+  teamId
+}: {
+  integrationAuthId: string;
+  teamId: string;
+}) => {
+  const {
+    data: { environments }
+  } = await apiRequest.get<{
+    environments: {
+      appId: string;
+      customEnvironments: VercelEnvironment[];
+    }[];
+  }>(`/api/v1/integration-auth/${integrationAuthId}/vercel/custom-environments`, {
+    params: {
+      teamId
+    }
+  });
+
+  return environments;
+};
+
+const fetchIntegrationAuthHerokuPipelines = async ({
+  integrationAuthId
+}: {
+  integrationAuthId: string;
+}) => {
+  const {
+    data: { pipelines }
+  } = await apiRequest.get<{ pipelines: HerokuPipelineCoupling[] }>(
+    `/api/v1/integration-auth/${integrationAuthId}/heroku/pipelines`
+  );
+
+  return pipelines;
+};
+
 const fetchIntegrationAuthRailwayEnvironments = async ({
   integrationAuthId,
   appId
@@ -342,6 +455,25 @@ const fetchIntegrationAuthBitBucketWorkspaces = async (integrationAuthId: string
   return workspaces;
 };
 
+const fetchIntegrationAuthBitBucketEnvironments = async (
+  integrationAuthId: string,
+  workspaceSlug: string,
+  repoSlug: string
+) => {
+  const {
+    data: { environments }
+  } = await apiRequest.get<{ environments: BitBucketEnvironment[] }>(
+    `/api/v1/integration-auth/${integrationAuthId}/bitbucket/environments`,
+    {
+      params: {
+        workspaceSlug,
+        repoSlug
+      }
+    }
+  );
+  return environments;
+};
+
 const fetchIntegrationAuthNorthflankSecretGroups = async ({
   integrationAuthId,
   appId
@@ -386,6 +518,28 @@ const fetchIntegrationAuthTeamCityBuildConfigs = async ({
   return buildConfigs;
 };
 
+const fetchIntegrationAuthOctopusDeploySpaces = async (integrationAuthId: string) => {
+  const {
+    data: { spaces }
+  } = await apiRequest.get<{
+    spaces: { Name: string; Slug: string; Id: string; IsDefault: boolean }[];
+  }>(`/api/v1/integration-auth/${integrationAuthId}/octopus-deploy/spaces`);
+  return spaces;
+};
+
+const fetchIntegrationAuthOctopusDeployScopeValues = async ({
+  integrationAuthId,
+  scope,
+  spaceId,
+  resourceId
+}: TGetIntegrationAuthOctopusDeployScopeValuesDTO) => {
+  const { data } = await apiRequest.get<TOctopusDeployVariableSetScopeValues>(
+    `/api/v1/integration-auth/${integrationAuthId}/octopus-deploy/scope-values`,
+    { params: { scope, spaceId, resourceId } }
+  );
+  return data;
+};
+
 export const useGetIntegrationAuthById = (integrationAuthId: string) => {
   return useQuery({
     queryKey: integrationAuthKeys.getIntegrationAuthById(integrationAuthId),
@@ -394,24 +548,30 @@ export const useGetIntegrationAuthById = (integrationAuthId: string) => {
   });
 };
 
-export const useGetIntegrationAuthApps = ({
-  integrationAuthId,
-  teamId,
-  workspaceSlug
-}: {
-  integrationAuthId: string;
-  teamId?: string;
-  workspaceSlug?: string;
-}) => {
+export const useGetIntegrationAuthApps = (
+  {
+    integrationAuthId,
+    teamId,
+    azureDevOpsOrgName,
+    workspaceSlug
+  }: {
+    integrationAuthId: string;
+    teamId?: string;
+    azureDevOpsOrgName?: string;
+    workspaceSlug?: string;
+  },
+  options?: TReactQueryOptions["options"]
+) => {
   return useQuery({
     queryKey: integrationAuthKeys.getIntegrationAuthApps(integrationAuthId, teamId, workspaceSlug),
     queryFn: () =>
       fetchIntegrationAuthApps({
         integrationAuthId,
         teamId,
+        azureDevOpsOrgName,
         workspaceSlug
       }),
-    enabled: true
+    ...options
   });
 };
 
@@ -465,10 +625,66 @@ export const useGetIntegrationAuthChecklyGroups = ({
   });
 };
 
+export const useGetIntegrationAuthGithubOrgs = (integrationAuthId: string) => {
+  return useQuery({
+    queryKey: integrationAuthKeys.getIntegrationAuthGithubOrgs(integrationAuthId),
+    queryFn: () => fetchIntegrationAuthGithubOrgs(integrationAuthId),
+    enabled: true
+  });
+};
+
+export const useGetIntegrationAuthGithubEnvs = (
+  integrationAuthId: string,
+  repoName: string,
+  repoOwner: string
+) => {
+  return useQuery({
+    queryKey: integrationAuthKeys.getIntegrationAuthGithubEnvs(
+      integrationAuthId,
+      repoName,
+      repoOwner
+    ),
+    queryFn: () => fetchIntegrationAuthGithubEnvs(integrationAuthId, repoName, repoOwner),
+    enabled: true
+  });
+};
+
 export const useGetIntegrationAuthQoveryOrgs = (integrationAuthId: string) => {
   return useQuery({
     queryKey: integrationAuthKeys.getIntegrationAuthQoveryOrgs(integrationAuthId),
     queryFn: () => fetchIntegrationAuthQoveryOrgs(integrationAuthId),
+    enabled: true
+  });
+};
+
+export const useGetIntegrationAuthAwsKmsKeys = ({
+  integrationAuthId,
+  region
+}: {
+  integrationAuthId: string;
+  region: string;
+}) => {
+  return useQuery({
+    queryKey: integrationAuthKeys.getIntegrationAuthAwsKmsKeys({
+      integrationAuthId,
+      region
+    }),
+    queryFn: async () => {
+      if (!region) return [];
+
+      const {
+        data: { kmsKeys }
+      } = await apiRequest.get<{ kmsKeys: KmsKey[] }>(
+        `/api/v1/integration-auth/${integrationAuthId}/aws-secrets-manager/kms-keys`,
+        {
+          params: {
+            region
+          }
+        }
+      );
+
+      return kmsKeys;
+    },
     enabled: true
   });
 };
@@ -540,6 +756,41 @@ export const useGetIntegrationAuthQoveryScopes = ({
   });
 };
 
+export const useGetIntegrationAuthVercelCustomEnvironments = ({
+  integrationAuthId,
+  teamId
+}: {
+  integrationAuthId: string;
+  teamId: string;
+}) => {
+  return useQuery({
+    queryKey: integrationAuthKeys.getIntegrationAuthVercelCustomEnv(integrationAuthId, teamId),
+    queryFn: () =>
+      fetchIntegrationAuthVercelCustomEnvironments({
+        integrationAuthId,
+        teamId
+      }),
+    enabled: Boolean(teamId && integrationAuthId)
+  });
+};
+
+export const useGetIntegrationAuthHerokuPipelines = ({
+  integrationAuthId
+}: {
+  integrationAuthId: string;
+}) => {
+  return useQuery({
+    queryKey: integrationAuthKeys.getIntegrationAuthHerokuPipelines({
+      integrationAuthId
+    }),
+    queryFn: () =>
+      fetchIntegrationAuthHerokuPipelines({
+        integrationAuthId
+      }),
+    enabled: true
+  });
+};
+
 export const useGetIntegrationAuthRailwayEnvironments = ({
   integrationAuthId,
   appId
@@ -587,6 +838,62 @@ export const useGetIntegrationAuthBitBucketWorkspaces = (integrationAuthId: stri
     queryKey: integrationAuthKeys.getIntegrationAuthBitBucketWorkspaces(integrationAuthId),
     queryFn: () => fetchIntegrationAuthBitBucketWorkspaces(integrationAuthId),
     enabled: true
+  });
+};
+
+export const useGetIntegrationAuthOctopusDeploySpaces = (integrationAuthId: string) => {
+  return useQuery({
+    queryKey: integrationAuthKeys.getIntegrationAuthOctopusDeploySpaces(integrationAuthId),
+    queryFn: () => fetchIntegrationAuthOctopusDeploySpaces(integrationAuthId)
+  });
+};
+
+export const useGetIntegrationAuthOctopusDeployScopeValues = (
+  params: TGetIntegrationAuthOctopusDeployScopeValuesDTO,
+  options?: TReactQueryOptions["options"]
+) =>
+  useQuery({
+    queryKey: integrationAuthKeys.getIntegrationAuthOctopusDeployScopeValues(params),
+    queryFn: () => fetchIntegrationAuthOctopusDeployScopeValues(params),
+    ...options
+  });
+
+export const useGetIntegrationAuthBitBucketEnvironments = (
+  {
+    integrationAuthId,
+    workspaceSlug,
+    repoSlug
+  }: {
+    integrationAuthId: string;
+    workspaceSlug: string;
+    repoSlug: string;
+  },
+  options?: TReactQueryOptions["options"]
+) => {
+  return useQuery({
+    queryKey: integrationAuthKeys.getIntegrationAuthBitBucketEnvironments(
+      integrationAuthId,
+      workspaceSlug,
+      repoSlug
+    ),
+    queryFn: () =>
+      fetchIntegrationAuthBitBucketEnvironments(integrationAuthId, workspaceSlug, repoSlug),
+    ...options
+  });
+};
+
+const fetchIntegrationAuthCircleCIOrganizations = async (integrationAuthId: string) => {
+  const {
+    data: { organizations }
+  } = await apiRequest.get<{
+    organizations: CircleCIOrganization[];
+  }>(`/api/v1/integration-auth/${integrationAuthId}/circleci/organizations`);
+  return organizations;
+};
+export const useGetIntegrationAuthCircleCIOrganizations = (integrationAuthId: string) => {
+  return useQuery({
+    queryKey: integrationAuthKeys.getIntegrationAuthCircleCIOrganizations(integrationAuthId),
+    queryFn: () => fetchIntegrationAuthCircleCIOrganizations(integrationAuthId)
   });
 };
 
@@ -640,11 +947,13 @@ export const useAuthorizeIntegration = () => {
       workspaceId,
       code,
       integration,
+      installationId,
       url
     }: {
       workspaceId: string;
       code: string;
       integration: string;
+      installationId?: string;
       url?: string;
     }) => {
       const {
@@ -653,13 +962,16 @@ export const useAuthorizeIntegration = () => {
         workspaceId,
         code,
         integration,
+        installationId,
         url
       });
 
       return integrationAuth;
     },
     onSuccess: (res) => {
-      queryClient.invalidateQueries(workspaceKeys.getWorkspaceAuthorization(res.workspace));
+      queryClient.invalidateQueries({
+        queryKey: { queryKey: workspaceKeys.getWorkspaceAuthorization(res.workspace) }
+      });
     }
   });
 };
@@ -674,6 +986,7 @@ export const useSaveIntegrationAccessToken = () => {
       refreshToken,
       accessId,
       accessToken,
+      awsAssumeIamRoleArn,
       url,
       namespace
     }: {
@@ -682,6 +995,7 @@ export const useSaveIntegrationAccessToken = () => {
       refreshToken?: string;
       accessId?: string;
       accessToken?: string;
+      awsAssumeIamRoleArn?: string;
       url?: string;
       namespace?: string;
     }) => {
@@ -693,6 +1007,7 @@ export const useSaveIntegrationAccessToken = () => {
         refreshToken,
         accessId,
         accessToken,
+        awsAssumeIamRoleArn,
         url,
         namespace
       });
@@ -700,7 +1015,9 @@ export const useSaveIntegrationAccessToken = () => {
       return integrationAuth;
     },
     onSuccess: (res) => {
-      queryClient.invalidateQueries(workspaceKeys.getWorkspaceAuthorization(res.workspace));
+      queryClient.invalidateQueries({
+        queryKey: workspaceKeys.getWorkspaceAuthorization(res.workspace)
+      });
     }
   });
 };
@@ -708,7 +1025,7 @@ export const useSaveIntegrationAccessToken = () => {
 export const useDeleteIntegrationAuths = () => {
   const queryClient = useQueryClient();
 
-  return useMutation<{}, {}, { integration: string; workspaceId: string }>({
+  return useMutation<object, object, { integration: string; workspaceId: string }>({
     mutationFn: ({ integration, workspaceId }) =>
       apiRequest.delete(
         `/api/v1/integration-auth?${new URLSearchParams({
@@ -717,8 +1034,12 @@ export const useDeleteIntegrationAuths = () => {
         })}`
       ),
     onSuccess: (_, { workspaceId }) => {
-      queryClient.invalidateQueries(workspaceKeys.getWorkspaceAuthorization(workspaceId));
-      queryClient.invalidateQueries(workspaceKeys.getWorkspaceIntegrations(workspaceId));
+      queryClient.invalidateQueries({
+        queryKey: workspaceKeys.getWorkspaceAuthorization(workspaceId)
+      });
+      queryClient.invalidateQueries({
+        queryKey: workspaceKeys.getWorkspaceIntegrations(workspaceId)
+      });
     }
   });
 };
@@ -727,11 +1048,15 @@ export const useDeleteIntegrationAuth = () => {
   // not used
   const queryClient = useQueryClient();
 
-  return useMutation<{}, {}, { id: string; workspaceId: string }>({
+  return useMutation<object, object, { id: string; workspaceId: string }>({
     mutationFn: ({ id }) => apiRequest.delete(`/api/v1/integration-auth/${id}`),
     onSuccess: (_, { workspaceId }) => {
-      queryClient.invalidateQueries(workspaceKeys.getWorkspaceAuthorization(workspaceId));
-      queryClient.invalidateQueries(workspaceKeys.getWorkspaceIntegrations(workspaceId));
+      queryClient.invalidateQueries({
+        queryKey: workspaceKeys.getWorkspaceAuthorization(workspaceId)
+      });
+      queryClient.invalidateQueries({
+        queryKey: workspaceKeys.getWorkspaceIntegrations(workspaceId)
+      });
     }
   });
 };

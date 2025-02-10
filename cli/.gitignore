@@ -1,2 +1,4 @@
 .infisical.json
 dist/
+agent-config.test.yaml
+.test.env

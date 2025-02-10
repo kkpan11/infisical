@@ -1,11 +1,12 @@
 # Description 📣
 
-<!-- Please include a summary of the change and which issue is fixed. Please also include relevant motivation and context. List any dependencies that are required for this change. -->
+<!-- Please include a summary of the change and which issue is fixed. Please also include relevant motivation and context. List any dependencies that are required for this change. Here's how we expect a pull request to be : https://infisical.com/docs/contributing/getting-started/pull-requests -->
 
 ## Type ✨
 
 - [ ] Bug fix
 - [ ] New feature
+- [ ] Improvement
 - [ ] Breaking change
 - [ ] Documentation
 
@@ -19,4 +20,6 @@
 
 ---
 
-- [ ] I have read the [contributing guide](https://infisical.com/docs/contributing/overview), agreed and acknowledged the [code of conduct](https://infisical.com/docs/contributing/code-of-conduct). 📝
+- [ ] I have read the [contributing guide](https://infisical.com/docs/contributing/getting-started/overview), agreed and acknowledged the [code of conduct](https://infisical.com/docs/contributing/getting-started/code-of-conduct). 📝
+
+<!-- If you have any questions regarding contribution, here's the FAQ : https://infisical.com/docs/contributing/getting-started/faq -->

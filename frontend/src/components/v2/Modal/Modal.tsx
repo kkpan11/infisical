@@ -7,17 +7,28 @@ import { twMerge } from "tailwind-merge";
 import { Card, CardBody, CardFooter, CardTitle } from "../Card";
 import { IconButton } from "../IconButton";
 
-export type ModalContentProps = DialogPrimitive.DialogContentProps & {
+export type ModalContentProps = Omit<DialogPrimitive.DialogContentProps, "title"> & {
   title?: ReactNode;
   subTitle?: ReactNode;
   footerContent?: ReactNode;
+  bodyClassName?: string;
   onClose?: () => void;
   overlayClassName?: string;
 };
 
 export const ModalContent = forwardRef<HTMLDivElement, ModalContentProps>(
   (
-    { children, title, subTitle, className, overlayClassName, footerContent, onClose, ...props },
+    {
+      children,
+      title,
+      subTitle,
+      className,
+      overlayClassName,
+      footerContent,
+      bodyClassName,
+      onClose,
+      ...props
+    },
     forwardedRef
   ) => (
     <DialogPrimitive.Portal>
@@ -29,18 +40,24 @@ export const ModalContent = forwardRef<HTMLDivElement, ModalContentProps>(
         <Card
           isRounded
           className={twMerge(
-            "fixed top-1/2 left-1/2 z-30 dark:[color-scheme:dark] max-h-screen thin-scrollbar max-w-xl -translate-y-2/4 -translate-x-2/4 animate-popIn border border-mineshaft-600 drop-shadow-2xl",
+            "thin-scrollbar fixed left-1/2 top-1/2 z-30 max-w-xl -translate-x-2/4 -translate-y-2/4 animate-popIn border border-mineshaft-600 drop-shadow-2xl dark:[color-scheme:dark]",
             className
           )}
+          style={{ maxHeight: "90%" }}
         >
           {title && <CardTitle subTitle={subTitle}>{title}</CardTitle>}
-          <CardBody>{children}</CardBody>
+          <CardBody
+            className={twMerge("overflow-y-auto overflow-x-hidden", bodyClassName)}
+            style={{ maxHeight: "90%" }}
+          >
+            {children}
+          </CardBody>
           {footerContent && <CardFooter>{footerContent}</CardFooter>}
           <DialogPrimitive.Close aria-label="Close" asChild onClick={onClose}>
             <IconButton
               variant="plain"
               ariaLabel="close"
-              className="absolute top-4 right-6 rounded text-bunker-400 hover:text-bunker-50"
+              className="absolute right-6 top-4 rounded text-bunker-400 hover:text-bunker-50"
             >
               <FontAwesomeIcon icon={faTimes} size="lg" className="cursor-pointer" />
             </IconButton>

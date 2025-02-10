@@ -9,12 +9,83 @@ type Authentication struct {
 	ServiceAccount ServiceAccountDetails `json:"serviceAccount"`
 	// +kubebuilder:validation:Optional
 	ServiceToken ServiceTokenDetails `json:"serviceToken"`
+	// +kubebuilder:validation:Optional
+	UniversalAuth UniversalAuthDetails `json:"universalAuth"`
+	// +kubebuilder:validation:Optional
+	KubernetesAuth KubernetesAuthDetails `json:"kubernetesAuth"`
+	// +kubebuilder:validation:Optional
+	AwsIamAuth AWSIamAuthDetails `json:"awsIamAuth"`
+	// +kubebuilder:validation:Optional
+	AzureAuth AzureAuthDetails `json:"azureAuth"`
+	// +kubebuilder:validation:Optional
+	GcpIdTokenAuth GCPIdTokenAuthDetails `json:"gcpIdTokenAuth"`
+	// +kubebuilder:validation:Optional
+	GcpIamAuth GcpIamAuthDetails `json:"gcpIamAuth"`
+}
+
+type UniversalAuthDetails struct {
+	// +kubebuilder:validation:Required
+	CredentialsRef KubeSecretReference `json:"credentialsRef"`
+	// +kubebuilder:validation:Required
+	SecretsScope MachineIdentityScopeInWorkspace `json:"secretsScope"`
+}
+
+type KubernetesAuthDetails struct {
+	// +kubebuilder:validation:Required
+	IdentityID string `json:"identityId"`
+	// +kubebuilder:validation:Required
+	ServiceAccountRef KubernetesServiceAccountRef `json:"serviceAccountRef"`
+
+	// +kubebuilder:validation:Required
+	SecretsScope MachineIdentityScopeInWorkspace `json:"secretsScope"`
+}
+
+type KubernetesServiceAccountRef struct {
+	// +kubebuilder:validation:Required
+	Name string `json:"name"`
+	// +kubebuilder:validation:Required
+	Namespace string `json:"namespace"`
+}
+
+type AWSIamAuthDetails struct {
+	// +kubebuilder:validation:Required
+	IdentityID string `json:"identityId"`
+
+	// +kubebuilder:validation:Required
+	SecretsScope MachineIdentityScopeInWorkspace `json:"secretsScope"`
+}
+
+type AzureAuthDetails struct {
+	// +kubebuilder:validation:Required
+	IdentityID string `json:"identityId"`
+	// +kubebuilder:validation:Optional
+	Resource string `json:"resource"`
+
+	// +kubebuilder:validation:Required
+	SecretsScope MachineIdentityScopeInWorkspace `json:"secretsScope"`
+}
+
+type GCPIdTokenAuthDetails struct {
+	// +kubebuilder:validation:Required
+	IdentityID string `json:"identityId"`
+
+	// +kubebuilder:validation:Required
+	SecretsScope MachineIdentityScopeInWorkspace `json:"secretsScope"`
+}
+
+type GcpIamAuthDetails struct {
+	// +kubebuilder:validation:Required
+	IdentityID string `json:"identityId"`
+	// +kubebuilder:validation:Required
+	ServiceAccountKeyFilePath string `json:"serviceAccountKeyFilePath"`
+
+	// +kubebuilder:validation:Required
+	SecretsScope MachineIdentityScopeInWorkspace `json:"secretsScope"`
 }
 
 type ServiceTokenDetails struct {
 	// +kubebuilder:validation:Required
 	ServiceTokenSecretReference KubeSecretReference `json:"serviceTokenSecretReference"`
-
 	// +kubebuilder:validation:Required
 	SecretsScope SecretScopeInWorkspace `json:"secretsScope"`
 }
@@ -28,34 +99,31 @@ type ServiceAccountDetails struct {
 type SecretScopeInWorkspace struct {
 	// +kubebuilder:validation:Required
 	SecretsPath string `json:"secretsPath"`
-
 	// +kubebuilder:validation:Required
 	EnvSlug string `json:"envSlug"`
-}
-
-type KubeSecretReference struct {
-	// The name of the Kubernetes Secret
-	// +kubebuilder:validation:Required
-	SecretName string `json:"secretName"`
-
-	// The name space where the Kubernetes Secret is located
-	// +kubebuilder:validation:Required
-	SecretNamespace string `json:"secretNamespace"`
-}
-
-type MangedKubeSecretConfig struct {
-	// The name of the Kubernetes Secret
-	// +kubebuilder:validation:Required
-	SecretName string `json:"secretName"`
-
-	// The name space where the Kubernetes Secret is located
-	// +kubebuilder:validation:Required
-	SecretNamespace string `json:"secretNamespace"`
-
-	// The Kubernetes Secret type (experimental feature). More info: https://kubernetes.io/docs/concepts/configuration/secret/#secret-types
 	// +kubebuilder:validation:Optional
-	// +kubebuilder:default:=Opaque
-	SecretType string `json:"secretType"`
+	Recursive bool `json:"recursive"`
+}
+
+type MachineIdentityScopeInWorkspace struct {
+	// +kubebuilder:validation:Required
+	SecretsPath string `json:"secretsPath"`
+	// +kubebuilder:validation:Required
+	EnvSlug string `json:"envSlug"`
+	// +kubebuilder:validation:Required
+	ProjectSlug string `json:"projectSlug"`
+	// +kubebuilder:validation:Optional
+	Recursive bool `json:"recursive"`
+}
+
+type InfisicalSecretTemplate struct {
+	// This injects all retrieved secrets into the top level of your template.
+	// Secrets defined in the template will take precedence over the injected ones.
+	// +kubebuilder:validation:Optional
+	IncludeAllSecrets bool `json:"includeAllSecrets"`
+	// The template key values
+	// +kubebuilder:validation:Optional
+	Data map[string]string `json:"data,omitempty"`
 }
 
 // InfisicalSecretSpec defines the desired state of InfisicalSecret
@@ -66,8 +134,11 @@ type InfisicalSecretSpec struct {
 	// +kubebuilder:validation:Optional
 	Authentication Authentication `json:"authentication"`
 
-	// +kubebuilder:validation:Required
-	ManagedSecretReference MangedKubeSecretConfig `json:"managedSecretReference"`
+	// +kubebuilder:validation:Optional
+	ManagedSecretReference ManagedKubeSecretConfig `json:"managedSecretReference"`
+
+	// +kubebuilder:validation:Optional
+	ManagedKubeSecretReferences []ManagedKubeSecretConfig `json:"managedKubeSecretReferences"`
 
 	// +kubebuilder:default:=60
 	ResyncInterval int `json:"resyncInterval"`
@@ -75,6 +146,9 @@ type InfisicalSecretSpec struct {
 	// Infisical host to pull secrets from
 	// +kubebuilder:validation:Optional
 	HostAPI string `json:"hostAPI"`
+
+	// +kubebuilder:validation:Optional
+	TLS TLSConfig `json:"tls"`
 }
 
 // InfisicalSecretStatus defines the observed state of InfisicalSecret

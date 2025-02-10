@@ -8,6 +8,7 @@ type UseToggleReturn = [
     on: VoidFn;
     off: VoidFn;
     toggle: VoidFn;
+    timedToggle: (timeout?: number) => void;
   }
 ];
 
@@ -26,5 +27,14 @@ export const useToggle = (initialState = false): UseToggleReturn => {
     setValue((prev) => (typeof isOpen === "boolean" ? isOpen : !prev));
   }, []);
 
-  return [value, { on, off, toggle }];
+  const timedToggle = useCallback((timeout = 2000) => {
+    setValue((prev) => !prev);
+
+    const timeoutRef = setTimeout(() => {
+      setValue(false);
+      clearTimeout(timeoutRef);
+    }, timeout);
+  }, []);
+
+  return [value, { on, off, toggle, timedToggle }];
 };
